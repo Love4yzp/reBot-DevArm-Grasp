@@ -217,28 +217,86 @@ rebot_grasp/
 
 ```yaml
 camera:
-  type: orbbec_gemini2
+  type: realsense_d435i
+  serial: null
   color_width: 1280
   color_height: 720
+  depth_width: 1280
+  depth_height: 720
   fps: 30
+
+calibration:
+  aruco:
+    marker_length_m: 0.1
+    dict_id: 0
+    target_marker_id: 0
+  hand_eye_method: TSAI
+
+detection:
+  conf_threshold: 0.5
+  iou_threshold: 0.45
 
 robot:
   repo_root: null   # 自动识别 sdk/reBotArm_control_py
+  config_path: null
+  urdf_path: null
+  pose_convention: xyz_euler_rad
   ready_pose:
     x: 0.3
     y: 0.0
     z: 0.3
-    pitch: 1.0
+    roll: 0.0
+    pitch: 0.7
     duration: 3.0
 
 yolo:
   model_name: "yoloe-26l-seg.pt"
   device: "cpu"          # GPU 可改为 "cuda:0"
+  use_world: true
   custom_classes:
     - "yellow banana"
     - "water bottle"
+    - "light blue coffee cup"
     - "cup"
+    - "green object"
+    - "red object"
+    - "tool"
+
+grasp_pipeline:
+  infer_every_live: 3
+  grasp:
+    depth_quantile: 0.6
+    pregrasp_offset_m: 0.080
 ```
+
+### YAML参数说明
+
+- `camera.type`：相机类型，可选 `realsense_d435i`、`realsense_d405`、`orbbec_gemini2`。
+- `camera.serial`：指定设备序列号；`null` 表示使用第一台可用设备。
+- `calibration.aruco.marker_length_m`：手眼标定用 ArUco 边长，单位米。
+- `detection.conf_threshold`：YOLO 检测置信度阈值。
+- `detection.iou_threshold`：YOLO NMS IoU 阈值。
+- `robot.repo_root`：`reBotArm_control_py` 仓库根目录；`null` 时自动查找 `cameraws/sdk/reBotArm_control_py`
+- `robot.config_path` / `robot.urdf_path`：机械臂控制配置和 URDF；`null` 表示使用 SDK 默认值。
+- `robot.ready_pose`：启动后先到达的预备位，抓取结束后也会回到这里。
+- `grasp_pipeline.infer_every_live`：实时预览时每 N 帧跑一次检测，减轻 CPU/GPU 压力。
+- `grasp_pipeline.grasp.depth_quantile`：短轴抓取管线使用的深度分位数，值越大通常抓取点越深。
+- `grasp_pipeline.grasp.pregrasp_offset_m`：预抓取位相对最终抓取位，沿末端进给方向回退的距离，单位米。
+
+### 模型选择库
+
+YOLO 模型会从 `cameraws/models/` 目录加载；如果模型文件不存在，Ultralytics 通常会尝试自动下载。
+
+常用模型：
+
+| 模型 | 说明 |
+| --- | --- |
+| `yoloe-26l-seg.pt` | 开放词汇 + 分割，当前默认 |
+| `yoloe-26s-seg.pt` | 更轻量，速度更快 |
+| `yolov8n-seg.pt` | 封闭类别分割，小模型 |
+| `yolov8s-seg.pt` | 封闭类别分割，精度更高 |
+
+当模型名包含 `world` / `yoloe`，并且 `yolo.use_world=true` 时，程序会调用 `model.set_classes(custom_classes)`，将 `yolo.custom_classes` 注入为开放词汇类别。普通 `yolov8*-seg.pt` 模型会忽略这组开放词汇类别。
 
 ### 手眼标定（首次使用）
 

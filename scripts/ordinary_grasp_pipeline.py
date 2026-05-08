@@ -9,7 +9,6 @@
 
 用法：
   conda activate seeed
-  cd /home/chlorine/seeed/cameraws
   python scripts/ordinary_grasp_pipeline.py
 """
 

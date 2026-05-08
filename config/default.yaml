@@ -1,5 +1,5 @@
 camera:
-  type: orbbec_gemini2
+  type: realsense_d435i
   serial: null
   color_width: 1280
   color_height: 720
