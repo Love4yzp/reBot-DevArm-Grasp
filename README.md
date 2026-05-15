@@ -72,39 +72,16 @@ git clone https://github.com/Seeed-Projects/reBot-DevArm-Grasp.git rebot_grasp
 cd rebot_grasp
 ```
 
-### Step 2. Create a conda environment
+### Step 2. Create and install the conda environment
 
 ```bash
-conda create -n rebotarm python=3.10 -y
+conda env create -f environment.yml
 conda activate rebotarm
 ```
 
-### Step 3. Install Python dependencies
+Do not install pip `pin>=3.9.0`: the pip `pin` package may require `numpy>=2.2,<2.3`, which conflicts with this project and several vision / point-cloud dependencies that still use `numpy<2.0`.
 
-```bash
-pip install -r requirements.txt
-```
-
-`requirements.txt` covers all dependencies for both the perception layer and the robotic arm control library:
-
-```
-# perception / detection
-numpy<2.0.0
-scipy>=1.10
-opencv-python<4.10.0
-opencv-contrib-python<4.10.0
-ultralytics
-PyYAML>=6.0
-pyrealsense2>=2.54
-
-# robotic arm (reBotArm_control_py)
-pin>=3.9.0
-meshcat>=0.3.2
-matplotlib>=3.10.0
-motorbridge>=0.1.7
-```
-
-### Step 4. Install the robotic arm control library
+### Step 3. Install the robotic arm control library
 
 ```bash
 git clone https://github.com/vectorBH6/reBotArm_control_py.git sdk/reBotArm_control_py
@@ -113,7 +90,7 @@ pip install -e .
 cd ../..
 ```
 
-### Step 5. Install the Orbbec SDK (pyorbbecsdk)
+### Step 4. Install the Orbbec SDK (pyorbbecsdk)
 
 This project depends on **pyorbbecsdk** — the Python wrapper for Orbbec SDK v2 — but the repository does not bundle `sdk/pyorbbecsdk` by default. Please clone it yourself under `sdk/` first.
 
@@ -204,7 +181,7 @@ rebot_grasp/
 ├── sdk/
 │   ├── pyorbbecsdk/              # Orbbec SDK Python wrapper
 │   └── reBotArm_control_py/      # reBot Arm SDK
-└── requirements.txt
+└── environment.yml               # Recommended conda environment
 ```
 
 ---

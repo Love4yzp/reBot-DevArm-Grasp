@@ -72,39 +72,14 @@ git clone https://github.com/Seeed-Projects/reBot-DevArm-Grasp.git rebot_grasp
 cd rebot_grasp
 ```
 
-### Step 2. 创建 conda 环境
+### Step 2. 创建并配置 conda 环境
 
 ```bash
-conda create -n rebotarm python=3.10 -y
+conda env create -f environment.yml
 conda activate rebotarm
 ```
 
-### Step 3. 安装 Python 依赖
-
-```bash
-pip install -r requirements.txt
-```
-
-`requirements.txt` 包含相机感知层及机械臂控制库所需的全部依赖：
-
-```
-# 感知 / 检测
-numpy<2.0.0
-scipy>=1.10
-opencv-python<4.10.0
-opencv-contrib-python<4.10.0
-ultralytics
-PyYAML>=6.0
-pyrealsense2>=2.54
-
-# 机械臂（reBotArm_control_py）
-pin>=3.9.0
-meshcat>=0.3.2
-matplotlib>=3.10.0
-motorbridge>=0.1.7
-```
-
-### Step 4. 安装机械臂控制库
+### Step 3. 安装机械臂控制库
 
 ```bash
 git clone https://github.com/vectorBH6/reBotArm_control_py.git sdk/reBotArm_control_py
@@ -113,7 +88,7 @@ pip install -e .
 cd ../..
 ```
 
-### Step 5. 安装 Orbbec SDK（pyorbbecsdk）
+### Step 4. 安装 Orbbec SDK（pyorbbecsdk）
 
 本项目依赖 **pyorbbecsdk**（Orbbec SDK v2 的 Python 封装），但仓库默认不包含 `sdk/pyorbbecsdk`。请先进入 `sdk/` 目录自行拉取官方仓库。
 
@@ -204,7 +179,7 @@ rebot_grasp/
 ├── sdk/
 │   ├── pyorbbecsdk/              # Orbbec SDK Python 封装
 │   └── reBotArm_control_py/      # reBot Arm SDK
-└── requirements.txt
+└── environment.yml               # 推荐的 conda 环境文件
 ```
 
 ---
