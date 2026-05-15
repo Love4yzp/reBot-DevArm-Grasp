@@ -217,28 +217,86 @@ Edit `config/default.yaml` and verify the key parameters:
 
 ```yaml
 camera:
-  type: orbbec_gemini2
+  type: realsense_d435i
+  serial: null
   color_width: 1280
   color_height: 720
+  depth_width: 1280
+  depth_height: 720
   fps: 30
+
+calibration:
+  aruco:
+    marker_length_m: 0.1
+    dict_id: 0
+    target_marker_id: 0
+  hand_eye_method: TSAI
+
+detection:
+  conf_threshold: 0.5
+  iou_threshold: 0.45
 
 robot:
   repo_root: null   # auto-detects sdk/reBotArm_control_py
+  config_path: null
+  urdf_path: null
+  pose_convention: xyz_euler_rad
   ready_pose:
     x: 0.3
     y: 0.0
     z: 0.3
-    pitch: 1.0
+    roll: 0.0
+    pitch: 0.7
     duration: 3.0
 
 yolo:
   model_name: "yoloe-26l-seg.pt"
   device: "cpu"          # use "cuda:0" for GPU
+  use_world: true
   custom_classes:
     - "yellow banana"
     - "water bottle"
+    - "light blue coffee cup"
     - "cup"
+    - "green object"
+    - "red object"
+    - "tool"
+
+grasp_pipeline:
+  infer_every_live: 3
+  grasp:
+    depth_quantile: 0.6
+    pregrasp_offset_m: 0.080
 ```
+
+### YAML parameter notes
+
+- `camera.type`: camera type. Available values: `realsense_d435i`, `realsense_d405`, `orbbec_gemini2`.
+- `camera.serial`: specific device serial number; `null` means use the first available device.
+- `calibration.aruco.marker_length_m`: ArUco marker side length used for hand-eye calibration, in meters.
+- `detection.conf_threshold`: YOLO confidence threshold.
+- `detection.iou_threshold`: YOLO NMS IoU threshold.
+- `robot.repo_root`: root directory of `reBotArm_control_py`; when `null`, the code auto-detects `cameraws/sdk/reBotArm_control_py`.
+- `robot.config_path` / `robot.urdf_path`: robot control config and URDF; `null` means use the SDK defaults.
+- `robot.ready_pose`: the ready pose reached on startup and after each completed grasp.
+- `grasp_pipeline.infer_every_live`: run detection once every N frames during live preview to reduce CPU/GPU load.
+- `grasp_pipeline.grasp.depth_quantile`: depth quantile used by the ordinary grasp pipeline; larger values usually place the grasp point deeper.
+- `grasp_pipeline.grasp.pregrasp_offset_m`: distance, in meters, to retreat along the tool approach direction when generating the pre-grasp pose.
+
+### Model selection
+
+YOLO models are loaded from `cameraws/models/`. If the file is missing, Ultralytics will usually try to download it automatically.
+
+Common choices:
+
+| Model | Description |
+| --- | --- |
+| `yoloe-26l-seg.pt` | Open-vocabulary + segmentation, current default |
+| `yoloe-26s-seg.pt` | Lighter and faster |
+| `yolov8n-seg.pt` | Closed-set segmentation, small model |
+| `yolov8s-seg.pt` | Closed-set segmentation, higher accuracy |
+
+If the model name contains `world` or `yoloe`, and `yolo.use_world=true`, the program calls `model.set_classes(custom_classes)` and injects `yolo.custom_classes` as open-vocabulary categories. Standard `yolov8*-seg.pt` models ignore these open-vocabulary class entries.
 
 ### Hand-eye calibration (first-time setup)
 

@@ -19,8 +19,6 @@ from typing import Any, Optional
 
 import cv2
 import numpy as np
-import yaml
-from ultralytics import YOLO
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -31,30 +29,14 @@ for _p in (PROJECT_ROOT,):
 
 from drivers.camera import make_camera
 from drivers.robot.rebot_arm import RebotArm
+from utils.camera_utils import load_config, load_hand_eye
 from utils.ordinary_grasp import GraspPose, draw_grasp, estimate_grasps, select_best_grasp
 from utils.transforms import (
     canonicalize_parallel_gripper_tcp_rotation,
-    mat4_to_pose6d,
     rotation_matrix_to_euler_zyx,
+    transform_grasp_pose_to_base,
 )
-
-
-def load_config(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        raise FileNotFoundError(f"Config not found: {path}")
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def load_hand_eye(project_root: Path, cam_type: str) -> tuple[Optional[np.ndarray], Optional[str]]:
-    hand_eye_path = project_root / "config" / "calibration" / cam_type / "hand_eye.npz"
-    if not hand_eye_path.exists():
-        return None, None
-
-    data = np.load(str(hand_eye_path), allow_pickle=False)
-    T = data["T_result"].astype(np.float64)
-    mode = str(data["mode"][0])
-    return T, mode
+from utils.yolo_utils import load_yolo
 
 
 def _move_ready(robot: RebotArm, ready_cfg: dict[str, Any]) -> None:
@@ -73,28 +55,6 @@ def _move_ready(robot: RebotArm, ready_cfg: dict[str, Any]) -> None:
 
 def _cam_to_base(T_hand_eye: np.ndarray, robot: RebotArm) -> np.ndarray:
     return robot.get_tcp_pose() @ T_hand_eye
-
-
-def _transform_grasp(
-    grasp: GraspPose,
-    T_cam2base: np.ndarray,
-    pregrasp_offset_m: float,
-) -> tuple[tuple[float, ...], tuple[float, ...]]:
-    T_grasp_cam = np.eye(4, dtype=np.float64)
-    T_grasp_cam[:3, :3] = grasp.tcp_rotation.astype(np.float64)
-    T_grasp_cam[:3, 3] = grasp.position.astype(np.float64)
-
-    T_grasp_base = T_cam2base @ T_grasp_cam
-    grasp_pos_base = T_grasp_base[:3, 3].copy()
-    grasp_rot_base = canonicalize_parallel_gripper_tcp_rotation(T_grasp_base[:3, :3])
-    T_grasp_base[:3, :3] = grasp_rot_base
-
-    pregrasp_pos_base = grasp_pos_base - grasp_rot_base[:, 0] * float(pregrasp_offset_m)
-    T_pregrasp_base = np.eye(4, dtype=np.float64)
-    T_pregrasp_base[:3, :3] = grasp_rot_base
-    T_pregrasp_base[:3, 3] = pregrasp_pos_base
-
-    return mat4_to_pose6d(T_grasp_base), mat4_to_pose6d(T_pregrasp_base)
 
 
 def _execute_grasp(
@@ -220,22 +180,16 @@ def main() -> int:
     K = cam.K.astype(np.float32)
 
     yolo_cfg = cfg.get("yolo", {})
-    det_cfg = cfg.get("detection", {})
     gp_cfg = cfg.get("grasp_pipeline", {})
     grasp_cfg = gp_cfg.get("grasp", {})
 
     model_name = yolo_cfg.get("model_name", "yoloe-26s-seg.pt")
-    yolo_device = yolo_cfg.get("device", "cpu")
-    conf = float(det_cfg.get("conf_threshold", 0.25))
-    iou = float(det_cfg.get("iou_threshold", 0.45))
     pregrasp_offset_m = float(grasp_cfg.get("pregrasp_offset_m", 0.08))
     depth_quantile = float(grasp_cfg.get("depth_quantile", 0.75))
     infer_every = max(1, int(gp_cfg.get("infer_every_live", 2)))
 
     print(f"=== 加载 YOLO: {model_name} ===")
-    model = YOLO(str(PROJECT_ROOT / "models" / model_name))
-    if yolo_cfg.get("use_world", True) and ("world" in model_name.lower() or "yoloe" in model_name.lower()):
-        model.set_classes(list(yolo_cfg.get("custom_classes", [])))
+    model, yolo_opts = load_yolo(cfg, project_root=PROJECT_ROOT)
 
     last_results: list[Any] = []
     last_grasps: list[GraspPose] = []
@@ -268,9 +222,9 @@ def main() -> int:
                 last_results = model.predict(
                     color_bgr,
                     verbose=False,
-                    device=yolo_device,
-                    conf=conf,
-                    iou=iou,
+                    device=yolo_opts.get("device", "cpu"),
+                    conf=float(yolo_opts.get("conf", 0.25)),
+                    iou=float(yolo_opts.get("iou", 0.45)),
                 )
                 last_grasps = estimate_grasps(last_results, depth_mm, K, depth_quantile=depth_quantile)
 
@@ -303,9 +257,9 @@ def main() -> int:
                 snap_results = model.predict(
                     snap_color,
                     verbose=False,
-                    device=yolo_device,
-                    conf=conf,
-                    iou=iou,
+                    device=yolo_opts.get("device", "cpu"),
+                    conf=float(yolo_opts.get("conf", 0.25)),
+                    iou=float(yolo_opts.get("iou", 0.45)),
                 )
                 snap_grasps = estimate_grasps(snap_results, snap_depth, K, depth_quantile=depth_quantile)
                 best = select_best_grasp(snap_grasps)
@@ -326,7 +280,12 @@ def main() -> int:
                     continue
 
                 T_cam2base = _cam_to_base(T_hand_eye, robot)
-                grasp6d, pre6d = _transform_grasp(best, T_cam2base, pregrasp_offset_m)
+                grasp6d, pre6d = transform_grasp_pose_to_base(
+                    best.position,
+                    best.tcp_rotation,
+                    T_cam2base,
+                    pregrasp_offset_m,
+                )
                 _execute_grasp(robot, grasp6d, pre6d, ready_cfg, dry_run=args.dry_run)
 
     finally:

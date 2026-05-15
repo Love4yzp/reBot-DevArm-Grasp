@@ -12,7 +12,6 @@ Eye-in-Hand 手眼标定 — 数据采集与计算（Gemini2 + reBotArm）
   ArUco 标记贴在工作台固定位置（不动）
 
 【用法】
-    cd /home/chlorine/seeed/cameraws
     python scripts/collect_handeye_eih.py           # 自动模式
     python scripts/collect_handeye_eih.py --manual  # 手动重力补偿模式
 """
