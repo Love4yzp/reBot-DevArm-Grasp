@@ -148,6 +148,47 @@ Download the prebuilt package and run `OrbbecViewer` to confirm the camera conne
 | pyorbbecsdk docs | https://orbbec.github.io/pyorbbecsdk/index.html |
 | ROS2 Wrapper | https://github.com/orbbec/OrbbecSDK_ROS2/tree/v2-main |
 
+### Step 5. Configure GraspNet (optional)
+
+You do not need GraspNet for `scripts/main.py` or `scripts/ordinary_grasp_pipeline.py`. Configure it only when you want to run `scripts/graspnet_camera_demo.py` or `scripts/grasp.py`, which require GraspNet baseline, CUDA-enabled PyTorch, the PointNet2/knn CUDA operators, and a pretrained checkpoint.
+
+```bash
+cd sdk
+git clone https://github.com/graspnet/graspnet-baseline.git
+cd graspnet-baseline
+
+# Install PyTorch for your CUDA version first, then install GraspNet runtime dependencies
+pip install open3d tensorboard Pillow tqdm
+
+# Build CUDA operators
+cd pointnet2
+python setup.py install
+cd ../knn
+python setup.py install
+cd ..
+
+# Install GraspNet API
+git clone https://github.com/graspnet/graspnetAPI.git
+cd graspnetAPI
+pip install .
+cd ../../..
+```
+
+After downloading the official GraspNet pretrained weight, place `checkpoint-rs.tar` at:
+
+```bash
+sdk/graspnet-baseline/checkpoints/checkpoint-rs.tar
+```
+
+Then verify `config/default.yaml`:
+
+```yaml
+graspnet:
+  checkpoint: "checkpoint-rs.tar"
+```
+
+The `checkpoint` field supports three forms: a file name is resolved under `sdk/graspnet-baseline/checkpoints/`; a relative path is resolved from the project root; an absolute path is used directly.
+
 ---
 
 ## 📁 Directory Structure
@@ -309,6 +350,23 @@ The full vision-grasping pipeline:
 
 Runs OBB grasp pose estimation and visualization without connecting to the arm. Useful for debugging the perception module in isolation.
 
+### `scripts/graspnet_camera_demo.py` — GraspNet camera estimation demo
+
+Runs GraspNet 6D grasp pose estimation with only the RGB-D camera, without connecting to the robotic arm. The script keeps a live camera preview, uses YOLO bounding boxes to select the target area, and filters feasible GraspNet full-scene candidates by the target bbox. Press `G` or `Space` to infer the current frame, `R` to resume live preview, and `Q` or `Esc` to quit. After inference, Open3D can visualize the point cloud and grasp candidates.
+
+```bash
+python scripts/graspnet_camera_demo.py
+```
+
+### `scripts/grasp.py` — GraspNet robotic grasping program
+
+Connects the GraspNet estimate to the robotic arm execution flow. YOLO selects the target, GraspNet outputs a 6D grasp pose, hand-eye calibration transforms it into the robot base frame, and the script checks IK reachability before running the pre-grasp, grasp, and retreat motion sequence. For debugging, start with `--dry-run` to print the target poses and candidate filtering result without moving the arm.
+
+```bash
+python scripts/grasp.py --dry-run
+python scripts/grasp.py --target-class "light blue coffee cup"
+```
+
 ### `scripts/object_detection.py` — Basic detection demo
 
 Pure YOLO detection with real-time bounding boxes and confidence scores. No grasping logic.
@@ -316,6 +374,87 @@ Pure YOLO detection with real-time bounding boxes and confidence scores. No gras
 ### `scripts/collect_handeye_eih.py` — Hand-eye calibration data collection
 
 Eye-in-Hand hand-eye calibration using ArUco markers, with both automatic pose traversal and manual gravity-compensation sampling. Supports TSAI, PARK, and HORAUD solvers.
+
+---
+
+## ❓ FAQ
+
+### 1. `ModuleNotFoundError: No module named 'motorbridge'`
+
+This usually means the robotic arm SDK dependencies are not installed in the current Python environment. Make sure the project environment is active, then update the environment and install the robotic arm SDK:
+
+```bash
+conda activate rebotarm
+conda env update -n rebotarm -f environment.yml
+cd sdk/reBotArm_control_py && pip install -e .
+```
+
+### 2. Pressing `G` does not execute grasping
+
+Common causes include:
+
+- `hand_eye.npz` does not exist
+- The hand-eye calibration mode is not `eye_in_hand`
+- The target pose is not reachable by IK
+
+It is recommended to validate the perception result and target pose in dry-run mode first:
+
+```bash
+python scripts/main.py --dry-run
+```
+
+### 3. The grasp depth is unstable
+
+Check and adjust these items first:
+
+- `grasp_pipeline.grasp.depth_quantile`
+- The installation height of the camera relative to the workspace
+- Reflective properties of the target surface
+
+### 4. GraspNet reports that `pointnet2_utils` cannot be imported from `pointnet2`
+
+This usually means the local CUDA extension under `sdk/graspnet-baseline/pointnet2` was not built in the active conda environment, or Python is resolving a different `pointnet2` package. Make sure the project environment is active, then rebuild both `pointnet2` and `knn` in that same environment:
+
+```bash
+conda activate rebotarm
+cd sdk/graspnet-baseline/pointnet2
+python setup.py install
+
+cd ../knn
+python setup.py install
+```
+
+Verify:
+
+```bash
+python -c "from pointnet2 import pointnet2_utils; print('Submodule import works')"
+```
+
+### 5. CUDA architecture compatibility issues on newer GPUs
+
+If you see `no kernel image is available for execution on the device`, or PyTorch reports that the current GPU CUDA capability is unsupported, the installed PyTorch wheel likely does not include CUDA kernels for that GPU architecture. Install a PyTorch build that supports your current CUDA/GPU architecture, then rebuild the GraspNet local CUDA extensions.
+
+```bash
+python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.get_device_name(0))"
+
+cd sdk/graspnet-baseline/pointnet2
+python setup.py install
+
+cd ../knn
+python setup.py install
+```
+
+If you need to specify the build architecture manually, set `TORCH_CUDA_ARCH_LIST` before rebuilding. Choose the value according to your GPU architecture and PyTorch/CUDA version.
+
+### 6. GraspNet inference reports `RuntimeError: CPU not supported`
+
+The sampling operators in `pointnet2` only support CUDA tensors. Confirm that CUDA is available, the GraspNet network and input point cloud are on GPU, and `pointnet2` / `knn` were built against the PyTorch version in the active environment.
+
+```bash
+python -c "import torch; print(torch.cuda.is_available())"
+```
+
+If the output is `False`, fix the CUDA / PyTorch installation first. If it is `True` but the error remains, rebuild `pointnet2` and `knn`.
 
 ---
 

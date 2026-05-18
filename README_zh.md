@@ -146,6 +146,47 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 | pyorbbecsdk 文档 | https://orbbec.github.io/pyorbbecsdk/index.html |
 | ROS2 Wrapper | https://github.com/orbbec/OrbbecSDK_ROS2/tree/v2-main |
 
+### Step 5. 配置 GraspNet（可选）
+
+为了实现对物体夹取姿态更准确的估计，本项目对[graspnet-baseline]{https://github.com/graspnet/graspnet-baseline}进行了适配，从而提升机械臂夹取的性能。
+
+```bash
+cd sdk
+git clone https://github.com/graspnet/graspnet-baseline.git
+cd graspnet-baseline
+
+# 按你的 CUDA 版本安装 PyTorch 后，再安装 GraspNet 运行依赖
+pip install open3d tensorboard Pillow tqdm
+
+# 编译 CUDA 算子
+cd pointnet2
+python setup.py install
+cd ../knn
+python setup.py install
+cd ..
+
+# 安装 GraspNet API
+git clone https://github.com/graspnet/graspnetAPI.git
+cd graspnetAPI
+pip install .
+cd ../../..
+```
+
+下载 GraspNet 官方预训练权重后，将 `checkpoint-rs.tar` 放到：
+
+```bash
+sdk/graspnet-baseline/checkpoints/checkpoint-rs.tar
+```
+
+然后在 `config/default.yaml` 中确认：
+
+```yaml
+graspnet:
+  checkpoint: "checkpoint-rs.tar"
+```
+
+`checkpoint` 支持三种写法：仅文件名会自动从 `sdk/graspnet-baseline/checkpoints/` 查找；相对路径会按项目根目录解析；绝对路径会直接使用。
+
 ---
 
 ## 📁 目录结构
@@ -307,6 +348,23 @@ python scripts/collect_handeye_eih.py --manual
 
 不依赖机械臂，仅验证 OBB 抓取姿态估计和可视化效果，适合调试感知模块。
 
+### `scripts/graspnet_camera_demo.py` — GraspNet 相机估计 Demo
+
+不连接机械臂，仅使用 RGB-D 相机运行 GraspNet 6D 夹取姿态估计。脚本会保留实时相机预览，并使用 YOLO 检测框选择目标区域，再从 GraspNet 全场景候选中筛选目标 bbox 内的可行夹取。按 `G` 或 `Space` 对当前帧推理，按 `R` 恢复实时预览，按 `Q` 或 `Esc` 退出；推理后可通过 Open3D 查看点云与夹取候选。
+
+```bash
+python scripts/graspnet_camera_demo.py
+```
+
+### `scripts/grasp.py` — GraspNet 机械臂抓取程序
+
+基于 `graspnet_camera_demo.py` 的估计结果接入机械臂执行流程：YOLO 选择目标，GraspNet 输出 6D 夹取姿态，经手眼标定转换到机械臂基坐标系，再检查 IK 可达性并执行预夹取、夹取、退回动作。调试时建议先使用 `--dry-run` 只打印目标位姿和候选筛选结果。
+
+```bash
+python scripts/grasp.py --dry-run
+python scripts/grasp.py --target-class "light blue coffee cup"
+```
+
 ### `scripts/object_detection.py` — 基础检测 Demo
 
 纯 YOLO 检测演示，实时显示检测框和置信度，无抓取逻辑。
@@ -314,6 +372,87 @@ python scripts/collect_handeye_eih.py --manual
 ### `scripts/collect_handeye_eih.py` — 手眼标定数据采集
 
 Eye-in-Hand 模式手眼标定，支持自动遍历采样和手动重力补偿采样，使用 ArUco 标记，支持 TSAI / PARK / HORAUD 三种求解方法。
+
+---
+
+## ❓ FAQ
+
+### 1. `ModuleNotFoundError: No module named 'motorbridge'`
+
+这通常表示当前 Python 环境还没有安装机械臂 SDK 依赖。请确认已激活项目环境，并重新同步环境与安装机械臂 SDK：
+
+```bash
+conda activate rebotarm
+conda env update -n rebotarm -f environment.yml
+cd sdk/reBotArm_control_py && pip install -e .
+```
+
+### 2. 按 `G` 后不执行抓取
+
+常见原因包括：
+
+- `hand_eye.npz` 不存在
+- 手眼标定模式不是 `eye_in_hand`
+- 当前目标位姿 IK 不可达
+
+建议先使用 dry-run 模式验证感知结果和目标位姿：
+
+```bash
+python scripts/main.py --dry-run
+```
+
+### 3. 抓取点深度不稳定
+
+可以优先检查和调整：
+
+- `grasp_pipeline.grasp.depth_quantile`
+- 相机与目标工作区域的安装高度
+- 目标表面的反光情况
+
+### 4. GraspNet 报 `pointnet2_utils` 无法从 `pointnet2` 导入
+
+这通常是 `sdk/graspnet-baseline/pointnet2` 本地 CUDA 扩展没有在当前 conda 环境中正确编译安装，或 Python 路径解析到了错误的 `pointnet2` 包。建议确认已激活项目环境，并在同一个环境中重新编译安装 `pointnet2` 与 `knn`：
+
+```bash
+conda activate rebotarm
+cd sdk/graspnet-baseline/pointnet2
+python setup.py install
+
+cd ../knn
+python setup.py install
+```
+
+验证：
+
+```bash
+python -c "from pointnet2 import pointnet2_utils; print('Submodule import works')"
+```
+
+### 5. 针对新显卡运行 GraspNet 时出现 CUDA 架构不兼容
+
+如果出现 `no kernel image is available for execution on the device` 或 PyTorch 提示当前 GPU 的 CUDA capability 不受支持，通常说明当前 PyTorch wheel 不包含该显卡架构对应的 CUDA kernel。建议安装支持当前 CUDA/显卡架构的 PyTorch 版本，然后重新编译 GraspNet 的本地 CUDA 扩展。
+
+```bash
+python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.get_device_name(0))"
+
+cd sdk/graspnet-baseline/pointnet2
+python setup.py install
+
+cd ../knn
+python setup.py install
+```
+
+如需手动指定编译架构，可在重新编译前设置 `TORCH_CUDA_ARCH_LIST`，具体取值请按当前显卡架构和 PyTorch/CUDA 版本确认。
+
+### 6. GraspNet 推理时报 `RuntimeError: CPU not supported`
+
+`pointnet2` 中的采样算子只支持 CUDA tensor。请确认 CUDA 可用、GraspNet 网络和输入点云都在 GPU 上，并且 `pointnet2` / `knn` 是在当前环境和当前 PyTorch 版本下编译的。
+
+```bash
+python -c "import torch; print(torch.cuda.is_available())"
+```
+
+如果输出为 `False`，需要先修复 CUDA / PyTorch 安装；如果输出为 `True` 但仍报错，建议重新编译 `pointnet2` 和 `knn`。
 
 ---
 
