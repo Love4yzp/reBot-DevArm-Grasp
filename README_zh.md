@@ -67,8 +67,17 @@ sudo chmod 666 /dev/ttyUSB0        # USB2CAN（端口号按实际调整）
 
 ### Step 1. 克隆仓库
 
+优先使用 Seeed-Projects 官方仓库：
+
 ```bash
 git clone https://github.com/Seeed-Projects/reBot-DevArm-Grasp.git rebot_grasp
+cd rebot_grasp
+```
+
+也可以使用当前开发仓库：
+
+```bash
+git clone https://github.com/EclipseaHime017/reBot-DevArm-Grasp.git rebot_grasp
 cd rebot_grasp
 ```
 
