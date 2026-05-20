@@ -67,8 +67,17 @@ sudo chmod 666 /dev/ttyUSB0        # USB2CAN (adjust port as needed)
 
 ### Step 1. Clone the repository
 
+Prefer the official Seeed-Projects repository:
+
 ```bash
 git clone https://github.com/Seeed-Projects/reBot-DevArm-Grasp.git rebot_grasp
+cd rebot_grasp
+```
+
+You can also use the current development repository:
+
+```bash
+git clone https://github.com/EclipseaHime017/reBot-DevArm-Grasp.git rebot_grasp
 cd rebot_grasp
 ```
 
