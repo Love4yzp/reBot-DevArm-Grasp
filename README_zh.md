@@ -97,11 +97,19 @@ pip install -e .
 cd ../..
 ```
 
-### Step 4. 安装 Orbbec SDK（pyorbbecsdk）
+### Step 4. 安装深度相机 SDK
 
-本项目依赖 **pyorbbecsdk**（Orbbec SDK v2 的 Python 封装），但仓库默认不包含 `sdk/pyorbbecsdk`。请先进入 `sdk/` 目录自行拉取官方仓库。
+**本项目使用Orbbec Gemini2 深度相机，用户可根据自身情况选择合适的深度相机安装对应的SDK后，可跳过本步骤。**
 
-**方式一：从 GitHub 获取（推荐）**
+Orbbec Gemini2 深度相机依赖 **pyorbbecsdk**（Orbbec SDK v2 的 Python 版本）。优先推荐直接安装预编译 Python 包：
+
+**方式一：通过 pip 安装（推荐）**
+
+```bash
+pip install pyorbbecsdk2
+```
+
+**方式二：从 GitHub 获取**
 
 ```bash
 # 安装编译依赖
@@ -113,14 +121,14 @@ cd pyorbbecsdk
 pip install -e .
 ```
 
-**方式二：从 Gitee 获取**
-
+对于中国大陆用户可以使用
 ```bash
-cd sdk
 git clone https://gitee.com/orbbecdeveloper/pyorbbecsdk.git
-cd pyorbbecsdk
-pip install -e .
 ```
+
+源码安装时，请先通过 CMake 编译生成原生扩展，确保 `install/lib` 中已有 `pyorbbecsdk*.so` 和 Orbbec 动态库，再执行 `pip install -e .`。
+
+注意，如果上述安装过程中均发生错误导致安装失败，请参考下方Orbbec官方文档进行安装操作。
 
 **验证安装**
 

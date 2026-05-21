@@ -99,11 +99,19 @@ pip install -e .
 cd ../..
 ```
 
-### Step 4. Install the Orbbec SDK (pyorbbecsdk)
+### Step 4. Install the depth camera SDK
 
-This project depends on **pyorbbecsdk** — the Python wrapper for Orbbec SDK v2 — but the repository does not bundle `sdk/pyorbbecsdk` by default. Please clone it yourself under `sdk/` first.
+**This project uses the Orbbec Gemini2 depth camera. If you use a different depth camera, install the matching SDK for your camera and skip this step.**
 
-**Option 1: Get it from GitHub (recommended)**
+The Orbbec Gemini2 depth camera depends on **pyorbbecsdk** — the Python wrapper for Orbbec SDK v2. Prefer installing the prebuilt Python package first:
+
+**Option 1: Install from pip (recommended)**
+
+```bash
+pip install pyorbbecsdk2
+```
+
+**Option 2: Get it from GitHub**
 
 ```bash
 # Install build dependencies
@@ -115,14 +123,15 @@ cd pyorbbecsdk
 pip install -e .
 ```
 
-**Option 2: Get it from Gitee**
+When installing from source, make sure the native extension has been built with CMake first so `install/lib` contains `pyorbbecsdk*.so` and the Orbbec shared libraries before running `pip install -e .`.
+
+Mainland China users can use:
 
 ```bash
-cd sdk
 git clone https://gitee.com/orbbecdeveloper/pyorbbecsdk.git
-cd pyorbbecsdk
-pip install -e .
 ```
+
+If all installation methods above fail, please refer to the official Orbbec documentation below.
 
 **Verify installation**
 
