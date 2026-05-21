@@ -170,6 +170,21 @@ Download the prebuilt package and run `OrbbecViewer` to confirm the camera conne
 
 You do not need GraspNet for `scripts/main.py` or `scripts/ordinary_grasp_pipeline.py`. Configure it only when you want to run `scripts/graspnet_camera_demo.py` or `scripts/grasp.py`, which require GraspNet baseline, CUDA-enabled PyTorch, the PointNet2/knn CUDA operators, and a pretrained checkpoint.
 
+The GraspNet `pointnet2` / `knn` extensions require a CUDA compiler. Before starting, make sure the active environment can find `nvcc`, and check that the CUDA version reported by `nvcc` matches the CUDA version used to build PyTorch:
+
+```bash
+nvcc --version
+python -c "import torch; print(torch.__version__, torch.version.cuda)"
+```
+
+If `nvcc` is missing, or if the CUDA version reported by `nvcc` does not match `torch.version.cuda`, install a CUDA compiler that matches your current PyTorch CUDA version. For example, if PyTorch reports `13.0`:
+
+```bash
+conda install -c nvidia cuda-nvcc=13.0
+```
+
+You can also install a PyTorch build that matches your current `nvcc` version instead. The two versions must match, otherwise building `pointnet2` / `knn` will fail with `The detected CUDA version (...) mismatches the version that was used to compile PyTorch (...)`.
+
 ```bash
 cd sdk
 git clone https://github.com/graspnet/graspnet-baseline.git
@@ -180,19 +195,25 @@ pip install open3d tensorboard Pillow tqdm
 
 # Build CUDA operators
 cd pointnet2
-python setup.py install
+pip install . --no-build-isolation
 cd ../knn
-python setup.py install
+pip install . --no-build-isolation
 cd ..
 
 # Install GraspNet API
 git clone https://github.com/graspnet/graspnetAPI.git
 cd graspnetAPI
+sed -i "s/'sklearn'/'scikit-learn'/" setup.py
+sed -i "s/'numpy==1.23.4'/'numpy>=1.24.0'/" setup.py
 pip install .
 cd ../../..
 ```
 
-After downloading the official GraspNet pretrained weight, place `checkpoint-rs.tar` at:
+***Note: If you follow the official graspnet-baseline repository documentation and use `python setup.py install`, CUDA / PyTorch related errors may occur. We recommend using `pip install . --no-build-isolation` so the extension is built against the PyTorch and CUDA configuration already installed in the active conda environment.***
+
+***In addition, older GraspNet API dependencies may still use the deprecated `sklearn` package name. The `sed` commands replace it with the currently recommended `scikit-learn` package name to avoid `The 'sklearn' PyPI package is deprecated` during installation. They also adjust `numpy==1.23.4` to `numpy>=1.24.0`, preventing GraspNet API installation from downgrading NumPy and conflicting with the robotic arm control dependencies.***
+
+Refer to the official graspnet-baseline repository to download the official GraspNet pretrained weight, then place `checkpoint-rs.tar` at:
 
 ```bash
 sdk/graspnet-baseline/checkpoints/checkpoint-rs.tar
@@ -436,10 +457,10 @@ This usually means the local CUDA extension under `sdk/graspnet-baseline/pointne
 ```bash
 conda activate rebotarm
 cd sdk/graspnet-baseline/pointnet2
-python setup.py install
+pip install . --no-build-isolation
 
 cd ../knn
-python setup.py install
+pip install . --no-build-isolation
 ```
 
 Verify:
@@ -456,10 +477,10 @@ If you see `no kernel image is available for execution on the device`, or PyTorc
 python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.get_device_name(0))"
 
 cd sdk/graspnet-baseline/pointnet2
-python setup.py install
+pip install . --no-build-isolation
 
 cd ../knn
-python setup.py install
+pip install . --no-build-isolation
 ```
 
 If you need to specify the build architecture manually, set `TORCH_CUDA_ARCH_LIST` before rebuilding. Choose the value according to your GPU architecture and PyTorch/CUDA version.
@@ -483,6 +504,7 @@ If the output is `False`, fix the CUDA / PyTorch installation first. If it is `T
 - [Orbbec Gemini 2](https://www.orbbec.com/products/stereo-vision-camera/gemini-2/)
 - [Orbbec SDK v2](https://github.com/orbbec/OrbbecSDK_v2)
 - [pyorbbecsdk](https://github.com/orbbec/pyorbbecsdk)
+- [graspnet/graspnet-baseline](https://github.com/graspnet/graspnet-baseline)
 - [Ultralytics YOLOv11](https://github.com/ultralytics/ultralytics)
 
 ---
