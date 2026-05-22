@@ -97,11 +97,19 @@ pip install -e .
 cd ../..
 ```
 
-### Step 4. 安装 Orbbec SDK（pyorbbecsdk）
+### Step 4. 安装深度相机 SDK
 
-本项目依赖 **pyorbbecsdk**（Orbbec SDK v2 的 Python 封装），但仓库默认不包含 `sdk/pyorbbecsdk`。请先进入 `sdk/` 目录自行拉取官方仓库。
+**本项目使用Orbbec Gemini2 深度相机，用户可根据自身情况选择合适的深度相机安装对应的SDK后，可跳过本步骤。**
 
-**方式一：从 GitHub 获取（推荐）**
+Orbbec Gemini2 深度相机依赖 **pyorbbecsdk**（Orbbec SDK v2 的 Python 版本）。优先推荐直接安装预编译 Python 包：
+
+**方式一：通过 pip 安装（推荐）**
+
+```bash
+pip install pyorbbecsdk2
+```
+
+**方式二：从 GitHub 获取**
 
 ```bash
 # 安装编译依赖
@@ -113,14 +121,14 @@ cd pyorbbecsdk
 pip install -e .
 ```
 
-**方式二：从 Gitee 获取**
-
+对于中国大陆用户可以使用
 ```bash
-cd sdk
 git clone https://gitee.com/orbbecdeveloper/pyorbbecsdk.git
-cd pyorbbecsdk
-pip install -e .
 ```
+
+源码安装时，请先通过 CMake 编译生成原生扩展，确保 `install/lib` 中已有 `pyorbbecsdk*.so` 和 Orbbec 动态库，再执行 `pip install -e .`。
+
+注意，如果上述安装过程中均发生错误导致安装失败，请参考下方Orbbec官方文档进行安装操作。
 
 **验证安装**
 
@@ -159,6 +167,21 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 为了实现对物体夹取姿态更准确的估计，本项目对[graspnet-baseline]{https://github.com/graspnet/graspnet-baseline}进行了适配，从而提升机械臂夹取的性能。
 
+GraspNet 的 `pointnet2` / `knn` 扩展需要 CUDA 编译器。开始前先确认当前环境可以找到 `nvcc`，并检查 `nvcc` 的 CUDA 版本是否和 PyTorch 编译时使用的 CUDA 版本一致：
+
+```bash
+nvcc --version
+python -c "import torch; print(torch.__version__, torch.version.cuda)"
+```
+
+如果没有 `nvcc`，或 `nvcc` 显示的 CUDA 版本与 `torch.version.cuda` 不一致，请安装与当前 PyTorch CUDA 版本匹配的 CUDA 编译器。例如 PyTorch 显示 `13.0` 时：
+
+```bash
+conda install -c nvidia cuda-nvcc=13.0
+```
+
+也可以反过来安装与当前 `nvcc` 版本匹配的 PyTorch。两者必须一致，否则编译 `pointnet2` / `knn` 时会出现 `The detected CUDA version (...) mismatches the version that was used to compile PyTorch (...)`。
+
 ```bash
 cd sdk
 git clone https://github.com/graspnet/graspnet-baseline.git
@@ -169,19 +192,25 @@ pip install open3d tensorboard Pillow tqdm
 
 # 编译 CUDA 算子
 cd pointnet2
-python setup.py install
+pip install . --no-build-isolation
 cd ../knn
-python setup.py install
+pip install . --no-build-isolation
 cd ..
 
 # 安装 GraspNet API
 git clone https://github.com/graspnet/graspnetAPI.git
 cd graspnetAPI
+sed -i "s/'sklearn'/'scikit-learn'/" setup.py
+sed -i "s/'numpy==1.23.4'/'numpy>=1.24.0'/" setup.py
 pip install .
 cd ../../..
 ```
 
-下载 GraspNet 官方预训练权重后，将 `checkpoint-rs.tar` 放到：
+***注：如果直接参考graspnet-baseline官方仓库文档使用 `python setup.py install` 可能报 CUDA / PyTorch 相关错误，建议使用 `pip install . --no-build-isolation`，让扩展在当前 conda 环境中复用已安装的 PyTorch 与 CUDA 配置进行编译。***
+
+***此外，GraspNet API 的旧版依赖中可能仍使用已弃用的 `sklearn` 包名， `sed` 命令会将其替换为当前推荐的 `scikit-learn`，避免安装时报 `The 'sklearn' PyPI package is deprecated`。同时将 `numpy==1.23.4` 调整为 `numpy>=1.24.0`，避免安装 GraspNet API 时把现有环境中的 NumPy 降级并与机械臂控制依赖产生冲突。***
+
+参考 graspnet-baseline 官方仓库下载 GraspNet 官方预训练权重后，将 `checkpoint-rs.tar` 放到：
 
 ```bash
 sdk/graspnet-baseline/checkpoints/checkpoint-rs.tar
@@ -425,10 +454,10 @@ python scripts/main.py --dry-run
 ```bash
 conda activate rebotarm
 cd sdk/graspnet-baseline/pointnet2
-python setup.py install
+pip install . --no-build-isolation
 
 cd ../knn
-python setup.py install
+pip install . --no-build-isolation
 ```
 
 验证：
@@ -445,10 +474,10 @@ python -c "from pointnet2 import pointnet2_utils; print('Submodule import works'
 python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.get_device_name(0))"
 
 cd sdk/graspnet-baseline/pointnet2
-python setup.py install
+pip install . --no-build-isolation
 
 cd ../knn
-python setup.py install
+pip install . --no-build-isolation
 ```
 
 如需手动指定编译架构，可在重新编译前设置 `TORCH_CUDA_ARCH_LIST`，具体取值请按当前显卡架构和 PyTorch/CUDA 版本确认。
@@ -472,6 +501,7 @@ python -c "import torch; print(torch.cuda.is_available())"
 - [Orbbec Gemini 2 产品页](https://www.orbbec.com.cn/index/Product/info.html?cate=38&id=51)
 - [Orbbec SDK v2](https://github.com/orbbec/OrbbecSDK_v2)
 - [pyorbbecsdk](https://github.com/orbbec/pyorbbecsdk)
+- [graspnet/graspnet-baseline](https://github.com/graspnet/graspnet-baseline)
 - [Ultralytics YOLOv11](https://github.com/ultralytics/ultralytics)
 
 ---
