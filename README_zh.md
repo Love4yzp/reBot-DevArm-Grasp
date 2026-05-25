@@ -190,6 +190,13 @@ cd graspnet-baseline
 # 按你的 CUDA 版本安装 PyTorch 后，再安装 GraspNet 运行依赖
 pip install open3d tensorboard Pillow tqdm
 
+# 编译本地算子前配置 CUDA 编译路径。
+export CUDA_HOME=$CONDA_PREFIX
+export TORCH_CUDA_ARCH_LIST="12.0"
+export CPATH=$CONDA_PREFIX/lib/python3.10/site-packages/nvidia/cu13/include:$CPATH
+export CPLUS_INCLUDE_PATH=$CONDA_PREFIX/lib/python3.10/site-packages/nvidia/cu13/include:$CPLUS_INCLUDE_PATH
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.10/site-packages/nvidia/cu13/lib:$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
 # 编译 CUDA 算子
 cd pointnet2
 pip install . --no-build-isolation
@@ -207,6 +214,8 @@ cd ../../..
 ```
 
 ***注：如果直接参考graspnet-baseline官方仓库文档使用 `python setup.py install` 可能报 CUDA / PyTorch 相关错误，建议使用 `pip install . --no-build-isolation`，让扩展在当前 conda 环境中复用已安装的 PyTorch 与 CUDA 配置进行编译。***
+
+***如果编译时报 `fatal error: cusparse.h: No such file or directory`，先运行 `find $CONDA_PREFIX -name cusparse.h`，并把包含 `cusparse.h` 的目录加入 `CPATH` / `CPLUS_INCLUDE_PATH`。如果 CUDA 头文件来自 conda `cuda-toolkit`，路径通常是 `$CONDA_PREFIX/targets/x86_64-linux/include`，而不是上面示例里的 pip `nvidia/cu13/include` 路径。***
 
 ***此外，GraspNet API 的旧版依赖中可能仍使用已弃用的 `sklearn` 包名， `sed` 命令会将其替换为当前推荐的 `scikit-learn`，避免安装时报 `The 'sklearn' PyPI package is deprecated`。同时将 `numpy==1.23.4` 调整为 `numpy>=1.24.0`，避免安装 GraspNet API 时把现有环境中的 NumPy 降级并与机械臂控制依赖产生冲突。***
 
