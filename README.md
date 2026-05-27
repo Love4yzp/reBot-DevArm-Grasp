@@ -211,7 +211,6 @@ cd ..
 git clone https://github.com/graspnet/graspnetAPI.git
 cd graspnetAPI
 sed -i "s/'sklearn'/'scikit-learn'/" setup.py
-sed -i "s/'numpy==1.23.4'/'numpy>=1.24.0'/" setup.py
 pip install .
 cd ../../..
 ```
@@ -220,7 +219,7 @@ cd ../../..
 
 ***If building fails with `fatal error: cusparse.h: No such file or directory`, run `find $CONDA_PREFIX -name cusparse.h` and make sure the directory that contains `cusparse.h` is included in `CPATH` / `CPLUS_INCLUDE_PATH`. If you installed CUDA headers from conda `cuda-toolkit`, the include path is usually `$CONDA_PREFIX/targets/x86_64-linux/include` instead of the pip `nvidia/cu13/include` path shown above.***
 
-***In addition, older GraspNet API dependencies may still use the deprecated `sklearn` package name. The `sed` commands replace it with the currently recommended `scikit-learn` package name to avoid `The 'sklearn' PyPI package is deprecated` during installation. They also adjust `numpy==1.23.4` to `numpy>=1.24.0`, preventing GraspNet API installation from downgrading NumPy and conflicting with the robotic arm control dependencies.***
+***In addition, older GraspNet API dependencies may still use the deprecated `sklearn` package name. The `sed` command replaces it with the currently recommended `scikit-learn` package name to avoid `The 'sklearn' PyPI package is deprecated` during installation. Keep GraspNet API's `numpy==1.23.4` pin unless you also upgrade its old dependencies, because `transforms3d==0.3.1` still uses deprecated NumPy aliases such as `np.float`.***
 
 Refer to the official graspnet-baseline repository to download the official GraspNet pretrained weight, then place `checkpoint-rs.tar` at:
 
@@ -342,7 +341,7 @@ grasp_pipeline:
 - `calibration.aruco.marker_length_m`: ArUco marker side length used for hand-eye calibration, in meters.
 - `detection.conf_threshold`: YOLO confidence threshold.
 - `detection.iou_threshold`: YOLO NMS IoU threshold.
-- `robot.repo_root`: root directory of `reBotArm_control_py`; when `null`, the code auto-detects `cameraws/sdk/reBotArm_control_py`.
+- `robot.repo_root`: root directory of `reBotArm_control_py`; when `null`, the code auto-detects `rebot_grasp/sdk/reBotArm_control_py`.
 - `robot.config_path` / `robot.urdf_path`: robot control config and URDF; `null` means use the SDK defaults.
 - `robot.ready_pose`: the ready pose reached on startup and after each completed grasp.
 - `grasp_pipeline.infer_every_live`: run detection once every N frames during live preview to reduce CPU/GPU load.
@@ -351,7 +350,7 @@ grasp_pipeline:
 
 ### Model selection
 
-YOLO models are loaded from `cameraws/models/`. If the file is missing, Ultralytics will usually try to download it automatically.
+YOLO models are loaded from `rebot_grasp/models/`. If the file is missing, Ultralytics will usually try to download it automatically.
 
 Common choices:
 
