@@ -341,7 +341,7 @@ grasp_pipeline:
 - `calibration.aruco.marker_length_m`: ArUco marker side length used for hand-eye calibration, in meters.
 - `detection.conf_threshold`: YOLO confidence threshold.
 - `detection.iou_threshold`: YOLO NMS IoU threshold.
-- `robot.repo_root`: root directory of `reBotArm_control_py`; when `null`, the code auto-detects `cameraws/sdk/reBotArm_control_py`.
+- `robot.repo_root`: root directory of `reBotArm_control_py`; when `null`, the code auto-detects `rebot_grasp/sdk/reBotArm_control_py`.
 - `robot.config_path` / `robot.urdf_path`: robot control config and URDF; `null` means use the SDK defaults.
 - `robot.ready_pose`: the ready pose reached on startup and after each completed grasp.
 - `grasp_pipeline.infer_every_live`: run detection once every N frames during live preview to reduce CPU/GPU load.
@@ -350,7 +350,7 @@ grasp_pipeline:
 
 ### Model selection
 
-YOLO models are loaded from `cameraws/models/`. If the file is missing, Ultralytics will usually try to download it automatically.
+YOLO models are loaded from `rebot_grasp/models/`. If the file is missing, Ultralytics will usually try to download it automatically.
 
 Common choices:
 

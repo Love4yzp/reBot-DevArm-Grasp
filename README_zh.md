@@ -338,7 +338,7 @@ grasp_pipeline:
 - `calibration.aruco.marker_length_m`：手眼标定用 ArUco 边长，单位米。
 - `detection.conf_threshold`：YOLO 检测置信度阈值。
 - `detection.iou_threshold`：YOLO NMS IoU 阈值。
-- `robot.repo_root`：`reBotArm_control_py` 仓库根目录；`null` 时自动查找 `cameraws/sdk/reBotArm_control_py`
+- `robot.repo_root`：`reBotArm_control_py` 仓库根目录；`null` 时自动查找 `rebot_grasp/sdk/reBotArm_control_py`
 - `robot.config_path` / `robot.urdf_path`：机械臂控制配置和 URDF；`null` 表示使用 SDK 默认值。
 - `robot.ready_pose`：启动后先到达的预备位，抓取结束后也会回到这里。
 - `grasp_pipeline.infer_every_live`：实时预览时每 N 帧跑一次检测，减轻 CPU/GPU 压力。
@@ -347,7 +347,7 @@ grasp_pipeline:
 
 ### 模型选择库
 
-YOLO 模型会从 `cameraws/models/` 目录加载；如果模型文件不存在，Ultralytics 通常会尝试自动下载。
+YOLO 模型会从 `rebot_grasp/models/` 目录加载；如果模型文件不存在，Ultralytics 通常会尝试自动下载。
 
 常用模型：
 
