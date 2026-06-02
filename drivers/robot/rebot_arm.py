@@ -1,5 +1,5 @@
 """
-cameraws.drivers.robot.rebot_arm
+drivers.robot.rebot_arm
 =================================
 轻量包装层，将 reBotArm_control_py 的低层 API 封装为
 相机感知系统需要的简洁接口，并内置夹爪力控状态机。
@@ -54,7 +54,7 @@ def find_rebot_repo_root(hint: Optional[str] = None) -> Path:
             return p
     raise FileNotFoundError(
         "找不到 reBotArm_control_py 仓库，请在 config/default.yaml 中设置 "
-        "robot.repo_root，或将 SDK 放到 cameraws/sdk/reBotArm_control_py"
+        "robot.repo_root，或将 SDK 放到 sdk/reBotArm_control_py"
     )
 
 

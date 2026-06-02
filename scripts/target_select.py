@@ -1,17 +1,17 @@
 """
-main.py — 基于短轴估计的机械臂夹取主程序
-=========================================
+target_select.py - OBB 交互式目标选择夹取脚本
+=====================================
 流程：
-  1. 机械臂 + 夹爪使能，移动到预备高位
-  2. 实时相机预览 + YOLO 检测 + 短轴夹取姿态估计
-  3. G 键：冻结当前帧并执行夹取（--dry-run 只打印坐标）
-  4. R 键：恢复实时预览
-  5. Q 键：退出，释放夹爪并回零位
+  1. 机械臂 + 夹爪使能，移动到预备位
+  2. 实时相机预览 + YOLO 检测 + OBB 短轴夹取姿态估计
+  3. Enter/Space：冻结当前帧，缓存所有识别物体和对应夹取估计
+  4. 冻结后按数字键选择目标夹取，R 恢复实时预览，Q/ESC 退出
 """
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import sys
 import time
 from pathlib import Path
@@ -20,7 +20,12 @@ from typing import Any, Optional
 import cv2
 import numpy as np
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) in sys.path:
+    sys.path.remove(str(SCRIPT_DIR))
+
+PROJECT_ROOT = SCRIPT_DIR.parent
 for _p in (PROJECT_ROOT,):
     _s = str(_p)
     if _s not in sys.path:
@@ -29,13 +34,23 @@ for _p in (PROJECT_ROOT,):
 from drivers.camera import make_camera
 from drivers.robot.rebot_arm import RebotArm
 from utils.camera_utils import load_config, load_hand_eye
-from utils.ordinary_grasp import GraspPose, draw_grasp, estimate_grasps, select_best_grasp
+from utils.ordinary_grasp import GraspPose, draw_grasp, estimate_grasps
 from utils.transforms import (
     canonicalize_parallel_gripper_tcp_rotation,
     rotation_matrix_to_euler_zyx,
     transform_grasp_pose_to_base,
 )
 from utils.yolo_utils import load_yolo
+
+
+@dataclass
+class FrozenSnapshot:
+    color_bgr: np.ndarray
+    depth_mm: np.ndarray
+    results: list[Any]
+    grasps: list[GraspPose]
+    selectable: list[GraspPose]
+    display: np.ndarray
 
 
 def _move_ready(robot: RebotArm, ready_cfg: dict[str, Any]) -> None:
@@ -90,45 +105,63 @@ def _execute_grasp(
 
     print("[Grasp] 夹取中...")
     ok = robot.grasp()
-    print("[Grasp] ✓ 夹取成功，力控保持中" if ok else "[Grasp] 空夹取")
+    print("[Grasp] 夹取成功，力控保持中" if ok else "[Grasp] 空夹取")
 
     print("[Grasp] 返回预备位...")
     _move_ready(robot, ready_cfg)
     return ok
 
 
+def _valid_grasps(grasps: list[GraspPose]) -> list[GraspPose]:
+    return sorted([grasp for grasp in grasps if grasp.is_valid], key=lambda grasp: grasp.conf, reverse=True)
+
+
+def _draw_selectable_index(display: np.ndarray, grasp: GraspPose, index: int) -> None:
+    x1, y1, _, _ = grasp.bbox_xyxy
+    origin = (max(0, x1 + 6), max(26, y1 + 26))
+    cv2.circle(display, origin, 16, (0, 255, 80), -1, cv2.LINE_AA)
+    cv2.putText(display, str(index), (origin[0] - 8, origin[1] + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 0), 2)
+
+
 def _render_display(
     image: np.ndarray,
     grasps: list[GraspPose],
-    best: Optional[GraspPose],
+    selectable: list[GraspPose],
     status_text: str,
+    frozen: bool = False,
 ) -> np.ndarray:
     display = image.copy()
     for grasp in grasps:
         draw_grasp(display, grasp)
 
-    cv2.putText(display, status_text, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (255, 255, 255), 2)
-    if best is not None:
-        x_m, y_m, z_m = best.position.tolist()
-        best_text = (
-            f"best={best.class_name} conf={best.conf:.2f} "
-            f"xyz=({x_m:+.3f},{y_m:+.3f},{z_m:+.3f}) jaw={best.jaw_width_m * 100:.1f}cm"
-        )
-        cv2.putText(
-            display,
-            best_text,
-            (10, display.shape[0] - 12),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (120, 255, 140),
-            2,
-        )
+    for index, grasp in enumerate(selectable[:9], start=1):
+        _draw_selectable_index(display, grasp, index)
+
+    cv2.putText(display, status_text, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (0, 0, 0), 4, cv2.LINE_AA)
+    cv2.putText(display, status_text, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (255, 255, 255), 2, cv2.LINE_AA)
+    if frozen:
+        cv2.putText(display, "[FROZEN]", (10, 56), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (0, 215, 255), 2, cv2.LINE_AA)
     return display
 
 
-def _print_best_grasp(grasp: GraspPose) -> None:
+def _print_snapshot(snapshot: FrozenSnapshot) -> None:
+    print("\n[Select] 已冻结当前帧，候选目标如下：")
+    if not snapshot.selectable:
+        print("  无有效夹取候选。按 R 重新采帧，或 Q 退出。")
+        return
+    for index, grasp in enumerate(snapshot.selectable[:9], start=1):
+        x1, y1, x2, y2 = grasp.bbox_xyxy
+        x_m, y_m, z_m = grasp.position.tolist()
+        print(
+            f"  {index}. {grasp.class_name} conf={grasp.conf:.2f} "
+            f"center={grasp.center_px} bbox=({x1},{y1},{x2},{y2}) "
+            f"xyz=({x_m:+.3f},{y_m:+.3f},{z_m:+.3f}) jaw={grasp.jaw_width_m * 100:.1f}cm"
+        )
+
+
+def _print_selected_grasp(index: int, grasp: GraspPose) -> None:
     tcp_rotation = canonicalize_parallel_gripper_tcp_rotation(grasp.tcp_rotation)
-    print("\n[G] 当前最佳夹取:")
+    print(f"\n[Select] 选择目标 #{index}:")
     print(f"  class={grasp.class_name} conf={grasp.conf:.3f}")
     print(f"  center_px={grasp.center_px} angle_deg={grasp.angle_deg:.2f}")
     print(f"  jaw_width_m={grasp.jaw_width_m:.4f} object_length_m={grasp.object_length_m:.4f}")
@@ -137,8 +170,29 @@ def _print_best_grasp(grasp: GraspPose) -> None:
     print(f"  tcp_rpy={rotation_matrix_to_euler_zyx(tcp_rotation).tolist()}")
 
 
+def _make_snapshot(
+    color_bgr: np.ndarray,
+    depth_mm: np.ndarray,
+    results: list[Any],
+    K: np.ndarray,
+    depth_quantile: float,
+) -> FrozenSnapshot:
+    grasps = estimate_grasps(results, depth_mm, K, depth_quantile=depth_quantile)
+    selectable = _valid_grasps(grasps)
+    status = "FROZEN | 1-9=select/grasp  R=reset  Q/ESC=quit"
+    display = _render_display(color_bgr, grasps, selectable, status, frozen=True)
+    return FrozenSnapshot(
+        color_bgr=color_bgr.copy(),
+        depth_mm=depth_mm.copy(),
+        results=results,
+        grasps=grasps,
+        selectable=selectable,
+        display=display,
+    )
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="基于短轴估计的机械臂夹取主程序")
+    parser = argparse.ArgumentParser(description="OBB 交互式目标选择夹取脚本")
     parser.add_argument("--config", default="config/default.yaml")
     parser.add_argument("--dry-run", action="store_true", help="只估计夹取姿态，不移动机械臂")
     return parser.parse_args()
@@ -192,16 +246,17 @@ def main() -> int:
 
     last_results: list[Any] = []
     last_grasps: list[GraspPose] = []
+    last_selectable: list[GraspPose] = []
+    frozen_snapshot: Optional[FrozenSnapshot] = None
     frozen = False
-    last_display: Optional[np.ndarray] = None
     frame_index = 0
     fps_counter = 0
     fps_timer = time.perf_counter()
     fps_value = 0.0
 
-    window_name = "Main — Ordinary Grasp"
+    window_name = "Select - OBB Grasp"
     cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
-    print("\n[Keys]  G=夹取  R=恢复  Q/ESC=退出\n")
+    print("\n[Keys] Enter/Space=冻结当前帧  1-9=选择夹取  R=恢复  Q/ESC=退出\n")
 
     try:
         while True:
@@ -226,14 +281,13 @@ def main() -> int:
                     iou=float(yolo_opts.get("iou", 0.45)),
                 )
                 last_grasps = estimate_grasps(last_results, depth_mm, K, depth_quantile=depth_quantile)
+                last_selectable = _valid_grasps(last_grasps)
 
-            status = f"{'FROZEN' if frozen else 'LIVE'} {fps_value:.1f}fps | G=夹取 R=恢复 Q=退出"
-            best_live = select_best_grasp(last_grasps)
-            if frozen and last_display is not None:
-                display = last_display.copy()
-                cv2.putText(display, "[FROZEN]", (10, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 215, 255), 2)
+            if frozen and frozen_snapshot is not None:
+                display = frozen_snapshot.display.copy()
             else:
-                display = _render_display(color_bgr, last_grasps, best_live, status)
+                status = f"LIVE {fps_value:.1f}fps | Enter=freeze  1-9=select after freeze  R=reset  Q=quit"
+                display = _render_display(color_bgr, last_grasps, last_selectable, status, frozen=False)
 
             cv2.imshow(window_name, display)
             key = cv2.waitKey(1) & 0xFF
@@ -243,16 +297,15 @@ def main() -> int:
                 break
             if key in (ord("r"), ord("R")):
                 frozen = False
-                last_display = None
+                frozen_snapshot = None
                 continue
 
-            if key in (ord("g"), ord("G")):
-                print("\n[G] 采帧并估计夹取姿态...")
+            if key in (13, 10, ord(" ")):
+                print("\n[Select] 冻结当前帧并缓存识别/夹取信息...")
                 snap_color, snap_depth = cam.get_frame()
                 if snap_color is None or snap_depth is None:
-                    print("[G] 采帧失败")
+                    print("[Select] 采帧失败")
                     continue
-
                 snap_results = model.predict(
                     snap_color,
                     verbose=False,
@@ -260,30 +313,31 @@ def main() -> int:
                     conf=float(yolo_opts.get("conf", 0.25)),
                     iou=float(yolo_opts.get("iou", 0.45)),
                 )
-                snap_grasps = estimate_grasps(snap_results, snap_depth, K, depth_quantile=depth_quantile)
-                best = select_best_grasp(snap_grasps)
-                if best is None:
-                    print("[G] 未找到有效夹取候选")
+                frozen_snapshot = _make_snapshot(snap_color, snap_depth, snap_results, K, depth_quantile)
+                frozen = True
+                _print_snapshot(frozen_snapshot)
+                continue
+
+            if frozen and frozen_snapshot is not None and ord("1") <= key <= ord("9"):
+                select_index = key - ord("0")
+                if select_index > len(frozen_snapshot.selectable):
+                    print(f"[Select] 编号 {select_index} 不存在")
                     continue
 
-                _print_best_grasp(best)
-
-                snap_display = _render_display(snap_color, snap_grasps, best, "SNAPSHOT")
-                frozen = True
-                last_display = snap_display
-                last_results = snap_results
-                last_grasps = snap_grasps
+                selected = frozen_snapshot.selectable[select_index - 1]
+                _print_selected_grasp(select_index, selected)
 
                 if T_hand_eye is None:
-                    print("[G] 手眼标定不可用，无法执行夹取")
+                    print("[Select] 手眼标定不可用，无法执行夹取")
                     continue
 
                 T_cam2base = _cam_to_base(T_hand_eye, robot)
                 grasp6d, pre6d = transform_grasp_pose_to_base(
-                    best.position,
-                    best.tcp_rotation,
+                    selected.position,
+                    selected.tcp_rotation,
                     T_cam2base,
                     pregrasp_offset_m,
+                    float(grasp_cfg.get("insertion_depth_m", 0.0)),
                 )
                 _execute_grasp(robot, grasp6d, pre6d, ready_cfg, dry_run=args.dry_run)
 

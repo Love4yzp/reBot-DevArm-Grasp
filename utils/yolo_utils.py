@@ -11,7 +11,7 @@ import numpy as np
 
 try:
     from .common_utils import class_name, clip_bbox, detection_count, tensor_to_numpy
-except ImportError:  # 支持从 cameraws/ 目录内以 ``utils.yolo_utils`` 形式导入
+except ImportError:  
     from common_utils import class_name, clip_bbox, detection_count, tensor_to_numpy
 
 
@@ -48,6 +48,7 @@ def load_yolo(
     conf_override: Optional[float] = None,
     iou_override: Optional[float] = None,
     infer_every_override: Optional[int] = None,
+    extra_classes: Optional[list[str]] = None,
 ) -> tuple[Optional[Any], dict[str, Any]]:
     gp_cfg = cfg.get("grasp_pipeline", {})
     yolo_opts: dict[str, Any] = {
@@ -67,6 +68,9 @@ def load_yolo(
     conf = float(conf_override if conf_override is not None else det_cfg.get("conf_threshold", 0.25))
     iou = float(iou_override if iou_override is not None else det_cfg.get("iou_threshold", 0.45))
     custom_classes = list(yolo_cfg.get("custom_classes", []))
+    for extra_class in extra_classes or []:
+        if extra_class and extra_class not in custom_classes:
+            custom_classes.append(extra_class)
     use_world = bool(yolo_cfg.get("use_world", True))
 
     print(f"Loading YOLO target detector: {model_path}")

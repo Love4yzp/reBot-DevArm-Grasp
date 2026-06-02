@@ -30,7 +30,6 @@ def make_camera(cfg: dict) -> CameraDriver:
     h   = cam_cfg.get("color_height", 720)
     fps = cam_cfg.get("fps", 30)
 
-    # cameraws/ 项目根目录（__file__ 在 drivers/camera/ 下，上溯两级）
     _root     = Path(__file__).resolve().parent.parent.parent
     calib_dir = str(_root / "config" / "calibration" / cam_type)
 

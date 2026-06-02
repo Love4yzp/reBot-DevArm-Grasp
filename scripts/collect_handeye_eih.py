@@ -28,13 +28,13 @@ import numpy as np
 import yaml
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("QT_QPA_FONTDIR", "/usr/share/fonts/truetype")
 
-from cameraws.drivers.camera import make_camera
-from cameraws.drivers.robot import RebotArm, ensure_rebot_sdk_in_syspath
-from cameraws.calibration.hand_eye import CalibMode, HandEyeCalibrator
+from drivers.camera import make_camera
+from drivers.robot import RebotArm, ensure_rebot_sdk_in_syspath
+from calibration.hand_eye import CalibMode, HandEyeCalibrator
 
 
 # ==========================================
