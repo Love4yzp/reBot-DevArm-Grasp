@@ -206,6 +206,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-depth", type=float, default=0.05, help="meters")
     parser.add_argument("--max-depth", type=float, default=2.0, help="meters")
     parser.add_argument("--target-class", default=None)
+    parser.add_argument("--extra-yolo-class", action="append", default=[], help="追加开放词汇 YOLO 类别")
     parser.add_argument("--target-margin-px", type=int, default=None)
     parser.add_argument("--target-expand-ratio", type=float, default=None, help="YOLO bbox 后处理筛选膨胀比例")
     parser.add_argument("--no-yolo", action="store_true", help="禁用 YOLO，全场景 GraspNet")
@@ -276,6 +277,7 @@ def main() -> int:
         conf_override=args.yolo_conf,
         iou_override=args.yolo_iou,
         infer_every_override=args.infer_every_live,
+        extra_classes=args.extra_yolo_class,
     )
     net = graspnet_utils.build_net(args.checkpoint, args.num_view)
 

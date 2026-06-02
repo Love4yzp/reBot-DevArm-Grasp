@@ -1,4 +1,4 @@
-"""Shared camera/config helpers for cameraws scripts."""
+"""Shared camera/config helpers for scripts."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import yaml
 
 try:
     from ..drivers.camera import CameraDriver, make_camera
-except ImportError:  # 支持从 cameraws/ 目录内以 ``utils.camera_utils`` 形式导入
+except ImportError:
     from drivers.camera import CameraDriver, make_camera
 
 

@@ -1,0 +1,26 @@
+input:
+  mode: record        # record | text | audio
+  text: null
+  audio: null
+  record_only: false
+
+recording:
+  seconds: 3.0
+  countdown: true
+  temp_audio: null
+
+asr:
+  language: en
+  model_dir: iic/SenseVoiceSmall
+  device: null
+  timeout_s: 120.0
+  allow_incomplete_model: false
+  verbose: false
+
+output:
+  json: true
+  compact: false
+
+grasp:
+  config: config/default.yaml
+  execute: true       # false = dry-run only, true = move the robot after a valid voice command

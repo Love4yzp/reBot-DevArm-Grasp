@@ -11,7 +11,7 @@ import numpy as np
 try:
     from .common_utils import detection_count, tensor_to_numpy
     from .transforms import grasp_axes_to_rebot_tcp_rotation
-except ImportError:  # 支持从 cameraws/ 目录内以 ``utils.ordinary_grasp`` 或脚本路径导入
+except ImportError:  
     from common_utils import detection_count, tensor_to_numpy
     from transforms import grasp_axes_to_rebot_tcp_rotation
 

@@ -17,7 +17,7 @@ GRASPNET_ROOT = PROJECT_ROOT / "sdk" / "graspnet-baseline"
 
 
 def _prepare_imports() -> None:
-    sys.path.insert(0, str(PROJECT_ROOT.parent))
+    sys.path.insert(0, str(PROJECT_ROOT))
     for subdir in ("models", "dataset", "utils", "pointnet2", "graspnetAPI"):
         sys.path.insert(0, str(GRASPNET_ROOT / subdir))
     sys.path.insert(0, str(GRASPNET_ROOT))
@@ -25,10 +25,10 @@ def _prepare_imports() -> None:
 
 _prepare_imports()
 
-from cameraws.drivers.camera import make_camera  # noqa: E402
-from cameraws.utils.camera_utils import configure_camera, load_config  # noqa: E402
-import cameraws.utils.graspnet_utils as graspnet_utils  # noqa: E402
-from cameraws.utils.yolo_utils import detect_objects, load_yolo  # noqa: E402
+from drivers.camera import make_camera  # noqa: E402
+from utils.camera_utils import configure_camera, load_config  # noqa: E402
+import utils.graspnet_utils as graspnet_utils  # noqa: E402
+from utils.yolo_utils import detect_objects, load_yolo  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
