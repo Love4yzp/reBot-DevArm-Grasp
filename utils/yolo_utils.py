@@ -11,7 +11,7 @@ import numpy as np
 
 try:
     from .common_utils import class_name, clip_bbox, detection_count, tensor_to_numpy
-except ImportError:  # 支持从 cameraws/ 目录内以 ``utils.yolo_utils`` 形式导入
+except ImportError:  
     from common_utils import class_name, clip_bbox, detection_count, tensor_to_numpy
 
 

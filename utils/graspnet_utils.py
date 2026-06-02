@@ -39,7 +39,7 @@ prepare_graspnet_imports()
 
 try:
     from .yolo_utils import YoloDetection
-except ImportError:  # 支持从 cameraws/ 目录内以 ``utils.graspnet_utils`` 形式导入
+except ImportError:  
     from yolo_utils import YoloDetection
 
 from collision_detector import ModelFreeCollisionDetector  # noqa: E402

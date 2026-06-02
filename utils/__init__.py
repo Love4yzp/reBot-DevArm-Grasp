@@ -1,4 +1,4 @@
-"""Utility helpers for cameraws."""
+"""Utility helpers."""
 
 try:
     from .ordinary_grasp import (
