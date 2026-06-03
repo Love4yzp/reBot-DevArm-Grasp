@@ -3,7 +3,7 @@
 特性：外部 YAML 配置化、动态模型加载、统一 3D 坐标系转换
 
 用法：
-    cd /your/path/to/cameraws
+    cd /your/path/to/project
     python scripts/main.py
 """
 
@@ -85,8 +85,8 @@ def main():
 
     # ── 相机（统一通过驱动接口）──
     print(f"\n=== 初始化相机: {cam_type} ===")
-    sys.path.insert(0, str(project_root.parent))
-    from cameraws.drivers.camera import make_camera
+    sys.path.insert(0, str(project_root))
+    from drivers.camera import make_camera
 
     try:
         cam = make_camera(cfg)

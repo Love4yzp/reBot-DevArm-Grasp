@@ -12,16 +12,15 @@ import time
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
-SEEED_ROOT = PROJECT_ROOT.parent
 if str(SCRIPT_DIR) in sys.path:
     sys.path.remove(str(SCRIPT_DIR))
-if str(SEEED_ROOT) not in sys.path:
-    sys.path.insert(0, str(SEEED_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from cameraws.utils.voice.asr import model_cache_status, transcribe_with_timeout
-from cameraws.utils.voice.config import load_voice_config
-from cameraws.utils.voice.recorder import record_wav
-from cameraws.utils.voice.semantic import parse_command
+from utils.voice.asr import model_cache_status, transcribe_with_timeout
+from utils.voice.config import load_voice_config
+from utils.voice.recorder import record_wav
+from utils.voice.semantic import parse_command
 
 
 def parse_args() -> argparse.Namespace:

@@ -394,7 +394,7 @@ def _run_grasp_once(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="语音指令版短轴估计机械臂夹取主程序")
-    parser.add_argument("--voice-config", default=None, help="语音与夹取运行配置 YAML，默认 cameraws/config/voice.yaml")
+    parser.add_argument("--voice-config", default=None, help="语音与夹取运行配置 YAML，默认 config/voice.yaml")
     return parser.parse_args()
 
 
