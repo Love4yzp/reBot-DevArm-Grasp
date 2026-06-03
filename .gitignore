@@ -1,7 +1,7 @@
 info
 Log
 data
-unused
+unused/*
 mobileclip2_b.ts
 __pycache__/
 *.pyc

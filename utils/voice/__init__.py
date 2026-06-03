@@ -1,4 +1,4 @@
-"""Voice command helpers for cameraws."""
+"""Voice command helpers."""
 
 from .asr import SenseVoiceRecognizer, model_cache_status, resolve_model_dir, transcribe_with_timeout
 from .semantic import CommandIntent, TargetInfo, parse_command

@@ -24,15 +24,14 @@ from ultralytics import YOLO
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SEEED_ROOT = PROJECT_ROOT.parent
-for _path in (SEEED_ROOT,):
+for _path in (PROJECT_ROOT,):
     path_str = str(_path)
     if path_str not in sys.path:
         sys.path.insert(0, path_str)
 
-from cameraws.drivers.camera import make_camera
-from cameraws.utils.ordinary_grasp import draw_grasp, estimate_grasps, get_depth_mm, select_best_grasp
-from cameraws.utils.transforms import canonicalize_parallel_gripper_tcp_rotation, rotation_matrix_to_euler_zyx
+from drivers.camera import make_camera
+from utils.ordinary_grasp import draw_grasp, estimate_grasps, get_depth_mm, select_best_grasp
+from utils.transforms import canonicalize_parallel_gripper_tcp_rotation, rotation_matrix_to_euler_zyx
 
 
 clicked_point = {"u": -1, "v": -1}

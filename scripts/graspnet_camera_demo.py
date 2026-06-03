@@ -17,10 +17,20 @@ GRASPNET_ROOT = PROJECT_ROOT / "sdk" / "graspnet-baseline"
 
 
 def _prepare_imports() -> None:
-    sys.path.insert(0, str(PROJECT_ROOT))
-    for subdir in ("models", "dataset", "utils", "pointnet2", "graspnetAPI"):
-        sys.path.insert(0, str(GRASPNET_ROOT / subdir))
-    sys.path.insert(0, str(GRASPNET_ROOT))
+    project_root = str(PROJECT_ROOT)
+    if project_root in sys.path:
+        sys.path.remove(project_root)
+    sys.path.insert(0, project_root)
+
+    graspnet_paths = [
+        GRASPNET_ROOT,
+        *(GRASPNET_ROOT / subdir for subdir in ("models", "dataset", "utils", "pointnet2", "graspnetAPI")),
+    ]
+    for path in reversed(graspnet_paths):
+        path_str = str(path)
+        if path_str in sys.path:
+            sys.path.remove(path_str)
+        sys.path.insert(1, path_str)
 
 
 _prepare_imports()

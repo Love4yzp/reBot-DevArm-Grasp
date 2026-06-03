@@ -30,33 +30,39 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
 os.environ.setdefault("QT_QPA_FONTDIR", "/usr/share/fonts/truetype")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SEEED_ROOT = PROJECT_ROOT.parent
 GRASPNET_ROOT = PROJECT_ROOT / "sdk" / "graspnet-baseline"
 
 
 def _prepare_imports() -> None:
-    for path in (SEEED_ROOT, PROJECT_ROOT):
+    project_root = str(PROJECT_ROOT)
+    if project_root in sys.path:
+        sys.path.remove(project_root)
+    sys.path.insert(0, project_root)
+
+    graspnet_paths = [
+        GRASPNET_ROOT,
+        *(GRASPNET_ROOT / subdir for subdir in ("models", "dataset", "utils", "pointnet2", "graspnetAPI")),
+    ]
+    for path in reversed(graspnet_paths):
         path_str = str(path)
-        if path_str not in sys.path:
-            sys.path.insert(0, path_str)
-    for subdir in ("models", "dataset", "utils", "pointnet2", "graspnetAPI"):
-        sys.path.insert(0, str(GRASPNET_ROOT / subdir))
-    sys.path.insert(0, str(GRASPNET_ROOT))
+        if path_str in sys.path:
+            sys.path.remove(path_str)
+        sys.path.insert(1, path_str)
 
 
 _prepare_imports()
 
-from cameraws.drivers.camera import make_camera  # noqa: E402
-from cameraws.drivers.robot.rebot_arm import RebotArm  # noqa: E402
-from cameraws.drivers.robot import rebot_arm  # noqa: E402
-import cameraws.utils.graspnet_utils as graspnet_utils  # noqa: E402
-from cameraws.utils.camera_utils import configure_camera, load_config, load_hand_eye  # noqa: E402
-from cameraws.utils.transforms import (  # noqa: E402
+from drivers.camera import make_camera  # noqa: E402
+from drivers.robot.rebot_arm import RebotArm  # noqa: E402
+from drivers.robot import rebot_arm  # noqa: E402
+import utils.graspnet_utils as graspnet_utils  # noqa: E402
+from utils.camera_utils import configure_camera, load_config, load_hand_eye  # noqa: E402
+from utils.transforms import (  # noqa: E402
     canonicalize_parallel_gripper_tcp_rotation,
     graspnet_rotation_to_rebot_tcp_rotation,
     rotation_matrix_to_euler_zyx,
 )
-from cameraws.utils.yolo_utils import (  # noqa: E402
+from utils.yolo_utils import (  # noqa: E402
     YoloDetection,
     detect_objects,
     load_yolo as load_yolo_from_config,
