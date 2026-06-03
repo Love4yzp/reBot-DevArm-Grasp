@@ -33,7 +33,7 @@ for _p in (PROJECT_ROOT,):
 
 from drivers.camera import make_camera
 from drivers.robot.rebot_arm import RebotArm
-from utils.camera_utils import load_config, load_hand_eye
+from utils.camera_utils import compose_cam_to_base_transform, load_config, load_hand_eye
 from utils.ordinary_grasp import GraspPose, draw_grasp, estimate_grasps
 from utils.transforms import (
     canonicalize_parallel_gripper_tcp_rotation,
@@ -67,8 +67,8 @@ def _move_ready(robot: RebotArm, ready_cfg: dict[str, Any]) -> None:
     robot.wait_motion(duration)
 
 
-def _cam_to_base(T_hand_eye: np.ndarray, robot: RebotArm) -> np.ndarray:
-    return robot.get_tcp_pose() @ T_hand_eye
+def _cam_to_base(T_hand_eye: np.ndarray, robot: RebotArm, cfg: dict[str, Any]) -> np.ndarray:
+    return compose_cam_to_base_transform(robot.get_tcp_pose(), T_hand_eye, cfg)
 
 
 def _execute_grasp(
@@ -331,7 +331,7 @@ def main() -> int:
                     print("[Select] 手眼标定不可用，无法执行夹取")
                     continue
 
-                T_cam2base = _cam_to_base(T_hand_eye, robot)
+                T_cam2base = _cam_to_base(T_hand_eye, robot, cfg)
                 grasp6d, pre6d = transform_grasp_pose_to_base(
                     selected.position,
                     selected.tcp_rotation,

@@ -293,6 +293,10 @@ calibration:
     dict_id: 0
     target_marker_id: 0
   hand_eye_method: TSAI
+  hand_eye_compensation_m:
+    x: 0.0
+    y: 0.0
+    z: 0.0
 
 detection:
   conf_threshold: 0.5
@@ -336,6 +340,7 @@ grasp_pipeline:
 - `camera.type`：相机类型，可选 `realsense_d435i`、`realsense_d405`、`orbbec_gemini2`。
 - `camera.serial`：指定设备序列号；`null` 表示使用第一台可用设备。
 - `calibration.aruco.marker_length_m`：手眼标定用 ArUco 边长，单位米。
+- `calibration.hand_eye_compensation_m`：手眼标定后的 XYZ 手动平移补偿，作用在机器人基坐标系下，单位为米。三项全为 `0.0` 时，补偿矩阵为单位矩阵。
 - `detection.conf_threshold`：YOLO 检测置信度阈值。
 - `detection.iou_threshold`：YOLO NMS IoU 阈值。
 - `robot.repo_root`：`reBotArm_control_py` 仓库根目录；`null` 时自动查找 `rebot_grasp/sdk/reBotArm_control_py`

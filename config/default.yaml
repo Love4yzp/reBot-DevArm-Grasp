@@ -13,6 +13,10 @@ calibration:
     dict_id: 0
     target_marker_id: 0
   hand_eye_method: TSAI
+  hand_eye_compensation_m:
+    x: 0.0
+    y: 0.0
+    z: 0.0
 
 detection:
   conf_threshold: 0.5

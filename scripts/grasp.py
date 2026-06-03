@@ -56,7 +56,7 @@ from drivers.camera import make_camera  # noqa: E402
 from drivers.robot.rebot_arm import RebotArm  # noqa: E402
 from drivers.robot import rebot_arm  # noqa: E402
 import utils.graspnet_utils as graspnet_utils  # noqa: E402
-from utils.camera_utils import configure_camera, load_config, load_hand_eye  # noqa: E402
+from utils.camera_utils import compose_cam_to_base_transform, configure_camera, load_config, load_hand_eye  # noqa: E402
 from utils.transforms import (  # noqa: E402
     canonicalize_parallel_gripper_tcp_rotation,
     graspnet_rotation_to_rebot_tcp_rotation,
@@ -439,7 +439,7 @@ def main() -> int:
                     print("[G] 手眼标定不可用，无法执行夹取")
                     continue
 
-                T_cam2base = robot.get_tcp_pose() @ T_hand_eye
+                T_cam2base = compose_cam_to_base_transform(robot.get_tcp_pose(), T_hand_eye, cfg)
                 selected = _select_executable_grasp(
                     robot,
                     result.grasps,

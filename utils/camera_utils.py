@@ -34,6 +34,23 @@ def load_hand_eye(project_root: str | Path, cam_type: str) -> tuple[Optional[np.
     return T, mode
 
 
+def hand_eye_compensation_matrix(cfg: dict[str, Any]) -> np.ndarray:
+    calibration = cfg.get("calibration") or {}
+    compensation = calibration.get("hand_eye_compensation_m") or {}
+    T = np.eye(4, dtype=np.float64)
+    T[:3, 3] = [
+        float(compensation.get("x", 0.0)),
+        float(compensation.get("y", 0.0)),
+        float(compensation.get("z", 0.0)),
+    ]
+    return T
+
+
+def compose_cam_to_base_transform(T_tcp2base: np.ndarray, T_hand_eye: np.ndarray, cfg: dict[str, Any]) -> np.ndarray:
+    T_compensation = hand_eye_compensation_matrix(cfg)
+    return T_compensation @ np.asarray(T_tcp2base, dtype=np.float64) @ np.asarray(T_hand_eye, dtype=np.float64)
+
+
 def configure_camera(
     cfg: dict[str, Any],
     args: argparse.Namespace,

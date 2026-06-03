@@ -296,6 +296,10 @@ calibration:
     dict_id: 0
     target_marker_id: 0
   hand_eye_method: TSAI
+  hand_eye_compensation_m:
+    x: 0.0
+    y: 0.0
+    z: 0.0
 
 detection:
   conf_threshold: 0.5
@@ -339,6 +343,7 @@ grasp_pipeline:
 - `camera.type`: camera type. Available values: `realsense_d435i`, `realsense_d405`, `orbbec_gemini2`.
 - `camera.serial`: specific device serial number; `null` means use the first available device.
 - `calibration.aruco.marker_length_m`: ArUco marker side length used for hand-eye calibration, in meters.
+- `calibration.hand_eye_compensation_m`: manual XYZ translation compensation applied after hand-eye calibration, in the robot base frame and in meters. When all values are `0.0`, the compensation matrix is the identity matrix.
 - `detection.conf_threshold`: YOLO confidence threshold.
 - `detection.iou_threshold`: YOLO NMS IoU threshold.
 - `robot.repo_root`: root directory of `reBotArm_control_py`; when `null`, the code auto-detects `rebot_grasp/sdk/reBotArm_control_py`.
