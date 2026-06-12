@@ -1,10 +1,8 @@
 camera:
-  type: orbbec_gemini2
+  type: realsense_d405
   serial: null
   color_width: 1280
   color_height: 720
-  depth_width: 1280
-  depth_height: 720
   fps: 30
 
 calibration:
@@ -14,7 +12,7 @@ calibration:
     target_marker_id: 0
   hand_eye_method: TSAI
   hand_eye_compensation_m:
-    x: 0.0
+    x: 0.02
     y: 0.0
     z: 0.0
 
@@ -24,9 +22,22 @@ detection:
 
 robot:
   repo_root: null
-  config_path: null
-  urdf_path: null
-  pose_convention: xyz_euler_rad
+  control:
+    dm:
+      arm_control_mode: posvel
+    rs:
+      arm_control_mode: mit
+  gripper:
+    dm:
+      angle_open: -5.0
+      tau_max: 1.5
+      close_torque: 1.0
+      default_force: 0.30
+    rs:
+      angle_open: 5.0
+      tau_max: 1.5
+      close_torque: -1.0
+      default_force: -0.30
   ready_pose:
     x: 0.3
     y: 0.0

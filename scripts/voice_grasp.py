@@ -414,9 +414,9 @@ def main() -> int:
 
     print("=== 初始化机械臂 ===")
     robot = RebotArm(
-        config_path=robot_cfg.get("config_path"),
-        urdf_path=robot_cfg.get("urdf_path"),
         repo_root=robot_cfg.get("repo_root"),
+        gripper_config=robot_cfg.get("gripper"),
+        control_config=robot_cfg.get("control"),
     )
     robot.connect(enable=True)
     robot.init_gripper()
@@ -585,7 +585,7 @@ def main() -> int:
             robot.safe_home()
         except Exception as exc:
             print(f"[退出] {exc}")
-        robot.disconnect()
+        robot.disconnect(safe_home=False)
         cam.close()
         cv2.destroyAllWindows()
         print("已退出。")

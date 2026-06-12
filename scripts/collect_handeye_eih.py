@@ -151,19 +151,30 @@ class GravityCompController:
     V_THRESH  = 0.04   # 末端线速度阈值 (m/s)
     W_THRESH  = 0.08   # 末端角速度阈值 (rad/s)
 
-    def __init__(self) -> None:
-        from reBotArm_control_py.actuator import RobotArm
+    def __init__(self, repo_root: str | None = None) -> None:
+        ensure_rebot_sdk_in_syspath(repo_root)
+
+        from reBotArm_control_py.actuator import RebotArm as DriverRebotArm
+        from reBotArm_control_py.controllers import RebotArmEndPose
         from reBotArm_control_py.dynamics import compute_generalized_gravity
         from reBotArm_control_py.kinematics import (
             load_robot_model, compute_fk, get_end_effector_frame_id,
         )
+        from reBotArm_control_py.kinematics.robot_model import pad_q_for_model
         import pinocchio as pin
 
+        self._RebotArmEndPose = RebotArmEndPose
         self._compute_gravity = compute_generalized_gravity
         self._compute_fk = compute_fk
+        self._pad_q_for_model = pad_q_for_model
         self._pin = pin
 
-        self._arm = RobotArm()
+        self._arm = DriverRebotArm()
+        if not self._arm.has_gripper:
+            raise ValueError(
+                "硬件配置缺少 groups.gripper：抓取系统要求配置夹爪，"
+                "请在 reBotArm_control_py/config 所选硬件 YAML 中启用 gripper 组"
+            )
         self._model = load_robot_model()
         self._data  = self._model.createData()
         self._ee_id = get_end_effector_frame_id(self._model)
@@ -172,42 +183,67 @@ class GravityCompController:
         self._q_target = None   # 锁止目标，list[ndarray] 供线程共享
         self._integral = None
         self._gc_running = threading.Event()
-        self._gc_thread: threading.Thread | None = None
+        self._io_lock = threading.RLock()
 
     def start(self) -> None:
         """连接、使能、切换 MIT 模式，启动重力补偿线程。"""
         self._arm.connect()
         print("[GravityComp] 已连接")
-        self._arm.enable()
+
+        self._arm.arm.mode_mit(
+            kp=np.full(self._arm.arm.num_joints, self.KP),
+            kd=np.full(self._arm.arm.num_joints, self.KD),
+        )
+        self._arm.gripper.mode_mit()
+        self._arm.enable_all()
         print("[GravityComp] 已使能")
 
-        n = self._arm.num_joints
+        n = self._arm.arm.num_joints
         self._n = n
-        q0 = self._arm.get_positions(request=True)
+        self._wait_state_valid()
+        with self._io_lock:
+            q0 = self._arm.get_state()[0][:n]
         self._q_target = [q0.copy()]
         self._integral = [np.zeros(n)]
 
-        self._arm.mode_mit(
-            kp=np.full(n, self.KP),
-            kd=np.full(n, self.KD),
-        )
         print(f"[GravityComp] MIT 模式，kp={self.KP} kd={self.KD}，可手动推臂")
 
         self._gc_running.set()
-        self._gc_thread = threading.Thread(target=self._worker, daemon=True)
-        self._gc_thread.start()
+        self._arm.start_control_loop(self._worker, rate=self._arm.rate)
+
+    def _wait_state_valid(self, timeout: float = 2.0) -> None:
+        """等待所有电机反馈就绪。"""
+        t_end = time.monotonic() + timeout
+        while time.monotonic() < t_end:
+            with self._io_lock:
+                self._arm.get_state()
+                ok = all(
+                    m.get_state() is not None
+                    for m in self._arm._motor_map.values()
+                )
+            if ok:
+                return
+            time.sleep(0.02)
+        raise RuntimeError("[GravityComp] 机械臂反馈未就绪")
 
     def safe_home(self) -> None:
-        """停止重力补偿，用 ArmEndPos 轨迹回零位，然后断开连接。"""
+        """停止重力补偿，用 SDK 的 RebotArmEndPose 回零，然后断开连接。"""
         self._gc_running.clear()
-        if self._gc_thread is not None:
-            self._gc_thread.join(timeout=1.0)
         try:
             print("[GravityComp] 回零位中...")
-            from reBotArm_control_py.controllers import ArmEndPos
-            ctrl = ArmEndPos(self._arm)
+            self._arm.stop_control_loop()
+            with self._io_lock:
+                q_now = self._arm.get_state()[0][: self._n]
+                g_now = self._arm.gripper.get_positions()
+
+            ctrl = self._RebotArmEndPose(
+                self._arm, arm_control_mode="mit", use_gravity_ff=True,
+            )
+            ctrl.set_gripper_target(float(g_now[0]) if g_now.size else 0.0)
+            ctrl._q_target[:] = q_now
             ctrl.start()
-            ctrl.end()
+            ctrl.safe_home()
+            self._arm.stop_control_loop()
         except Exception as e:
             print(f"[GravityComp] 回零位失败: {e}")
         try:
@@ -219,8 +255,6 @@ class GravityCompController:
     def stop(self) -> None:
         """停止重力补偿线程并断开连接（不复位）。"""
         self._gc_running.clear()
-        if self._gc_thread is not None:
-            self._gc_thread.join(timeout=1.0)
         try:
             self._arm.disconnect()
         except Exception:
@@ -229,49 +263,59 @@ class GravityCompController:
 
     def get_tcp_pose(self) -> np.ndarray:
         """读取当前末端位姿（4×4 T_gripper2base）。"""
-        q = self._arm.get_positions()
+        with self._io_lock:
+            q_arm = self._arm.get_state()[0][:self._n]
+        q = self._pad_q_for_model(self._model, q_arm, self._n)
         pos, rot, _ = self._compute_fk(self._model, q)
         T = np.eye(4, dtype=np.float64)
         T[:3, :3] = rot
         T[:3,  3] = pos
         return T
 
-    def _worker(self) -> None:
+    def _worker(self, r, dt: float) -> None:
+        if not self._gc_running.is_set():
+            return
+
         pin = self._pin
         model, data, ee_id = self._model, self._data, self._ee_id
         n = self._n
         KP, KD = self.KP, self.KD
 
-        while self._gc_running.is_set():
-            try:
-                q  = self._arm.get_positions()
-                qd = self._arm.get_velocities()
-                tau_g = self._compute_gravity(q=q)
+        try:
+            with self._io_lock:
+                q_all, qd_all, _ = r.get_state()
+            q = q_all[:n]
+            qd = qd_all[:n]
+            q_model = self._pad_q_for_model(model, q, n)
+            tau_g = self._compute_gravity(model=model, q=q_model)[:n]
 
-                q_err = self._q_target[0] - q
-                self._integral[0] += q_err * 1.0
-                np.clip(self._integral[0], -0.5, 0.5, out=self._integral[0])
+            q_err = self._q_target[0] - q
+            self._integral[0] += q_err * 1.0
+            np.clip(self._integral[0], -0.5, 0.5, out=self._integral[0])
 
-                pin.computeJointJacobians(model, data, q)
-                pin.updateFramePlacements(model, data)
-                J = pin.getFrameJacobian(model, data, ee_id, pin.ReferenceFrame.WORLD)
-                v = J @ qd
+            qd_model = np.zeros(model.nv)
+            qd_model[: min(model.nv, n)] = qd[: min(model.nv, n)]
+            pin.computeJointJacobians(model, data, q_model)
+            pin.updateFramePlacements(model, data)
+            J = pin.getFrameJacobian(model, data, ee_id, pin.ReferenceFrame.WORLD)
+            v = J @ qd_model
 
-                if (np.linalg.norm(v[:3]) > self.V_THRESH or
-                        np.linalg.norm(v[3:]) > self.W_THRESH):
-                    self._q_target[0] = q.copy()
-                    self._integral[0] *= 0.9
+            if (np.linalg.norm(v[:3]) > self.V_THRESH or
+                    np.linalg.norm(v[3:]) > self.W_THRESH):
+                self._q_target[0] = q.copy()
+                self._integral[0] *= 0.9
 
-                self._arm.mit(
+            with self._io_lock:
+                r.arm.send_mit(
                     pos=self._q_target[0],
                     vel=np.zeros(n),
                     kp=np.full(n, KP),
                     kd=np.full(n, KD),
                     tau=tau_g + self._integral[0],
                 )
-            except Exception:
-                pass
-            time.sleep(0.002)
+                r.gripper.send_mit(r.gripper.get_positions())
+        except Exception:
+            pass
 
 
 # ==========================================
@@ -320,40 +364,53 @@ def main():
     }
     result_saved = [False]
 
-    robot_cfg = cfg.get("robot", {})
-    try:
-        ensure_rebot_sdk_in_syspath(robot_cfg.get("repo_root"))
-        if args.manual:
-            gc_ctrl = GravityCompController()
-            gc_ctrl.start()
-            print(f"[机器人] 手动模式就绪 — 推动机械臂定位后按 Enter 采集")
-        else:
-            robot = RebotArm(
-                config_path=robot_cfg.get("config_path"),
-                urdf_path=robot_cfg.get("urdf_path"),
-                repo_root=robot_cfg.get("repo_root"),
-            )
-            robot.connect(enable=True)
-            print(f"[机器人] 自动模式就绪，共 {len(CALIB_POSES_XYZ)} 个预设姿态，将自动遍历采集")
-    except Exception as e:
-        print(f"[机器人] 连接失败: {e}")
-        sys.exit(1)
-
     print(f"\n=== Eye-in-Hand 手眼标定 ===")
     print(f"相机: {cam_type}  |  模式: {mode_str}  |  算法: {he_method}")
     print(f"ArUco 边长: {aruco_cfg['marker_length_m']*100:.0f}cm  |  保存: {save_path}")
     print()
+
+    # ── 开启相机：先确认相机可用，再使能机械臂 ──
+    try:
+        cam.open()
+        print("预热相机...", end="", flush=True)
+        cam.warm_up(20)
+        print(" 就绪\n")
+    except Exception as e:
+        try:
+            cam.close()
+        except Exception:
+            pass
+        print(f"[相机] 初始化失败: {e}")
+        sys.exit(1)
+
+    robot_cfg = cfg.get("robot", {})
+    try:
+        ensure_rebot_sdk_in_syspath(robot_cfg.get("repo_root"))
+        if args.manual:
+            gc_ctrl = GravityCompController(repo_root=robot_cfg.get("repo_root"))
+            gc_ctrl.start()
+            print(f"[机器人] 手动模式就绪 — 推动机械臂定位后按 Enter 采集")
+        else:
+            robot = RebotArm(
+                repo_root=robot_cfg.get("repo_root"),
+                gripper_config=robot_cfg.get("gripper"),
+                control_config=robot_cfg.get("control"),
+            )
+            robot.connect(enable=True)
+            print(f"[机器人] 自动模式就绪，共 {len(CALIB_POSES_XYZ)} 个预设姿态，将自动遍历采集")
+    except Exception as e:
+        try:
+            cam.close()
+        except Exception:
+            pass
+        print(f"[机器人] 连接失败: {e}")
+        sys.exit(1)
+
     if args.manual:
         print("【操作】Enter=采集  c/q=结束并计算  pos=当前末端位置")
     else:
         print("【操作】自动遍历姿态并自动采样  c/q=中断并计算  pos=当前末端位置")
     print()
-
-    # ── 开启相机 ──
-    cam.open()
-    print("预热相机...", end="", flush=True)
-    cam.warm_up(20)
-    print(" 就绪\n")
 
     latest_pose = [None]
     line_queue: queue.Queue | None = None
@@ -618,7 +675,7 @@ def main():
 
     print(f"\n结束，共 {calibrator.n_samples} 个样本。")
     if calibrator.n_samples > 0 and not result_saved[0]:
-        print("提示：本次未生成新的 hand_eye.npz，可补充样本后重试。")
+        print("提示：本次未生成 hand_eye.npz，可补充样本后重试。")
 
 
 if __name__ == "__main__":

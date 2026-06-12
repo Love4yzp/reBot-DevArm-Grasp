@@ -91,10 +91,10 @@ conda activate rebotarm
 ### Step 3. 安装机械臂控制库
 
 ```bash
-git clone https://github.com/vectorBH6/reBotArm_control_py.git sdk/reBotArm_control_py
-cd sdk/reBotArm_control_py
+git clone https://github.com/vectorBH6/reBotArm_control_py.git ../reBotArm_control_py
+cd ../reBotArm_control_py
 pip install -e .
-cd ../..
+cd ../rebot_grasp
 ```
 
 ### Step 4. 安装深度相机 SDK
@@ -216,7 +216,7 @@ cd ../../..
 
 ***如果编译时报 `fatal error: cusparse.h: No such file or directory`，先运行 `find $CONDA_PREFIX -name cusparse.h`，并把包含 `cusparse.h` 的目录加入 `CPATH` / `CPLUS_INCLUDE_PATH`。如果 CUDA 头文件来自 conda `cuda-toolkit`，路径通常是 `$CONDA_PREFIX/targets/x86_64-linux/include`，而不是上面示例里的 pip `nvidia/cu13/include` 路径。***
 
-***此外，GraspNet API 的旧版依赖中可能仍使用已弃用的 `sklearn` 包名。上面的 `sed` 命令会将 `sklearn` 替换为 `scikit-learn`，避免安装时报 `The 'sklearn' PyPI package is deprecated`。除非同步升级 GraspNet API 的旧依赖，否则建议保留其 `numpy==1.23.4` 约束，因为 `transforms3d==0.3.1` 仍使用 `np.float` 等旧 NumPy 别名。***
+***此外，GraspNet API 的依赖中可能仍使用 `sklearn` 包名。上面的 `sed` 命令会将 `sklearn` 替换为 `scikit-learn`，避免安装时出现包名提示。除非同步调整 GraspNet API 的依赖栈，否则建议保留其 `numpy==1.23.4` 约束，因为 `transforms3d==0.3.1` 仍使用 `np.float` 等 NumPy 别名。***
 
 参考 graspnet-baseline 官方仓库下载 GraspNet 官方预训练权重后，将 `checkpoint-rs.tar` 放到：
 
@@ -303,10 +303,23 @@ detection:
   iou_threshold: 0.45
 
 robot:
-  repo_root: null   # 自动识别 sdk/reBotArm_control_py
-  config_path: null
-  urdf_path: null
-  pose_convention: xyz_euler_rad
+  repo_root: null
+  control:
+    dm:
+      arm_control_mode: posvel
+    rs:
+      arm_control_mode: mit
+  gripper:
+    dm:
+      angle_open: -5.0
+      tau_max: 1.5
+      close_torque: 1.0
+      default_force: 0.30
+    rs:
+      angle_open: 5.0
+      tau_max: 1.5
+      close_torque: -1.0
+      default_force: -0.30
   ready_pose:
     x: 0.3
     y: 0.0
@@ -343,9 +356,11 @@ grasp_pipeline:
 - `calibration.hand_eye_compensation_m`：手眼标定后的 XYZ 手动平移补偿，作用在机器人基坐标系下，单位为米。三项全为 `0.0` 时，补偿矩阵为单位矩阵。
 - `detection.conf_threshold`：YOLO 检测置信度阈值。
 - `detection.iou_threshold`：YOLO NMS IoU 阈值。
-- `robot.repo_root`：`reBotArm_control_py` 仓库根目录；`null` 时自动查找 `rebot_grasp/sdk/reBotArm_control_py`
-- `robot.config_path` / `robot.urdf_path`：机械臂控制配置和 URDF；`null` 表示使用 SDK 默认值。
+- `robot.repo_root`：`reBotArm_control_py` 仓库根目录；
+- `robot.control.dm` / `robot.control.rs`：按机械臂电机厂商自动选择的控制模式覆写。默认 DM 使用 `posvel`，RS 使用 `mit`。
+- `robot.gripper.dm` / `robot.gripper.rs`：按夹爪电机厂商自动选择的两组夹爪参数。DM 与 RS 夹爪开合方向相反，`angle_open`、`close_torque`、`default_force` 符号相反；`tau_max` 为力矩上限。其余参数硬编码在 `drivers/robot/rebot_arm.py` 中。
 - `robot.ready_pose`：启动后先到达的预备位，抓取结束后也会回到这里。
+- 切换 DM/RS 机械臂：修改 `reBotArm_control_py/config/rebotarm.yaml` 中的 `hardware_yaml`（如 `rebotarm_dm.yaml` / `rebotarm_rs.yaml`）。
 - `grasp_pipeline.infer_every_live`：实时预览时每 N 帧跑一次检测，减轻 CPU/GPU 压力。
 - `grasp_pipeline.grasp.depth_quantile`：短轴抓取管线使用的深度分位数，值越大通常抓取点越深。
 - `grasp_pipeline.grasp.pregrasp_offset_m`：预抓取位相对最终抓取位，沿末端进给方向回退的距离，单位米。
@@ -435,7 +450,7 @@ Eye-in-Hand 模式手眼标定，支持自动遍历采样和手动重力补偿�
 ```bash
 conda activate rebotarm
 conda env update -n rebotarm -f environment.yml
-cd sdk/reBotArm_control_py && pip install -e .
+cd ../reBotArm_control_py && pip install -e .
 ```
 
 ### 2. 按 `G` 后不执行抓取
@@ -479,7 +494,7 @@ pip install . --no-build-isolation
 python -c "from pointnet2 import pointnet2_utils; print('Submodule import works')"
 ```
 
-### 5. 针对新显卡运行 GraspNet 时出现 CUDA 架构不兼容
+### 5. 当前显卡运行 GraspNet 时出现 CUDA 架构不兼容
 
 如果出现 `no kernel image is available for execution on the device` 或 PyTorch 提示当前 GPU 的 CUDA capability 不受支持，通常说明当前 PyTorch wheel 不包含该显卡架构对应的 CUDA kernel。建议安装支持当前 CUDA/显卡架构的 PyTorch 版本，然后重新编译 GraspNet 的本地 CUDA 扩展。
 
