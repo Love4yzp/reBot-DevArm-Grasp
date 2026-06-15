@@ -251,7 +251,7 @@ rebot_grasp/
 │   │   ├── orbbec_gemini2.py     # Gemini 2 驱动
 │   │   └── realsense.py          # RealSense 驱动（备用）
 │   └── robot/
-│       └── rebot_arm.py          # reBotArm 封装 + 夹爪状态机
+│       └── grasp_driver.py       # 基于机械臂 SDK 的轻量抓取辅助
 ├── calibration/
 │   ├── aruco_pose.py             # ArUco 位姿估计
 │   └── hand_eye.py               # 手眼标定求解
@@ -358,7 +358,7 @@ grasp_pipeline:
 - `detection.iou_threshold`：YOLO NMS IoU 阈值。
 - `robot.repo_root`：`reBotArm_control_py` 仓库根目录；
 - `robot.control.dm` / `robot.control.rs`：按机械臂电机厂商自动选择的控制模式覆写。默认 DM 使用 `posvel`，RS 使用 `mit`。
-- `robot.gripper.dm` / `robot.gripper.rs`：按夹爪电机厂商自动选择的两组夹爪参数。DM 与 RS 夹爪开合方向相反，`angle_open`、`close_torque`、`default_force` 符号相反；`tau_max` 为力矩上限。其余参数硬编码在 `drivers/robot/rebot_arm.py` 中。
+- `robot.gripper.dm` / `robot.gripper.rs`：按夹爪电机厂商自动选择的两组夹爪参数。DM 与 RS 夹爪开合方向相反，`angle_open`、`close_torque`、`default_force` 符号相反；`tau_max` 为力矩上限。其余夹爪行为参数在 `drivers/robot/grasp_driver.py` 中定义。
 - `robot.ready_pose`：启动后先到达的预备位，抓取结束后也会回到这里。
 - 切换 DM/RS 机械臂：修改 `reBotArm_control_py/config/rebotarm.yaml` 中的 `hardware_yaml`（如 `rebotarm_dm.yaml` / `rebotarm_rs.yaml`）。
 - `grasp_pipeline.infer_every_live`：实时预览时每 N 帧跑一次检测，减轻 CPU/GPU 压力。

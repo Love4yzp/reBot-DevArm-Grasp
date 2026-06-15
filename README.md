@@ -254,7 +254,7 @@ rebot_grasp/
 │   │   ├── orbbec_gemini2.py     # Gemini 2 driver
 │   │   └── realsense.py          # RealSense driver (alternative)
 │   └── robot/
-│       └── rebot_arm.py          # reBotArm wrapper + gripper FSM
+│       └── grasp_driver.py       # Thin grasp helper around the arm SDK
 ├── calibration/
 │   ├── aruco_pose.py             # ArUco pose estimation
 │   └── hand_eye.py               # Hand-eye calibration solver
@@ -361,7 +361,7 @@ grasp_pipeline:
 - `detection.iou_threshold`: YOLO NMS IoU threshold.
 - `robot.repo_root`: root directory of `reBotArm_control_py`; when `null`, the code auto-detects the repository next to this project.
 - `robot.control.dm` / `robot.control.rs`: arm control-mode overrides selected by the arm motor vendor. The default behavior matches the hardware family: DM uses `posvel`, RS uses `mit`.
-- `robot.gripper.dm` / `robot.gripper.rs`: per-arm gripper parameters, selected automatically by the gripper motor vendor. The DM and RS grippers open in opposite directions, so `angle_open`, `close_torque`, and `default_force` carry opposite signs; `tau_max` is the torque ceiling. Other parameters are hardcoded in `drivers/robot/rebot_arm.py`.
+- `robot.gripper.dm` / `robot.gripper.rs`: per-arm gripper parameters, selected automatically by the gripper motor vendor. The DM and RS grippers open in opposite directions, so `angle_open`, `close_torque`, and `default_force` carry opposite signs; `tau_max` is the torque ceiling. Other gripper behavior parameters are defined in `drivers/robot/grasp_driver.py`.
 - `robot.ready_pose`: the ready pose reached on startup and after each completed grasp.
 - To switch between the DM and RS arm, edit `hardware_yaml` in `reBotArm_control_py/config/rebotarm.yaml` (e.g. `rebotarm_dm.yaml` / `rebotarm_rs.yaml`). The hardware YAML must define a `gripper` group — the grasping system refuses to start without one.
 - `grasp_pipeline.infer_every_live`: run detection once every N frames during live preview to reduce CPU/GPU load.

@@ -12,9 +12,9 @@ calibration:
     target_marker_id: 0
   hand_eye_method: TSAI
   hand_eye_compensation_m:
-    x: 0.04
+    x: 0.01
     y: 0.0
-    z: -0.02
+    z: -0.01
 
 detection:
   conf_threshold: 0.5
@@ -36,8 +36,8 @@ robot:
     rs:
       angle_open: 5.0
       tau_max: 0.5
-      close_torque: -0.5
-      default_force: -0.30
+      close_torque: -0.3
+      default_force: -0.20
   ready_pose:
     x: 0.3
     y: 0.0
