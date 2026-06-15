@@ -53,8 +53,9 @@ def _prepare_imports() -> None:
 _prepare_imports()
 
 from drivers.camera import make_camera  # noqa: E402
-from drivers.robot.rebot_arm import RebotArm  # noqa: E402
-from drivers.robot import rebot_arm  # noqa: E402
+from drivers.robot.grasp_driver import GRIPPER_MAX_DISTANCE_M, GraspDriver, selected_arm_config  # noqa: E402
+from reBotArm_control_py.actuator import RebotArm  # noqa: E402
+from reBotArm_control_py.controllers import RebotArmEndPose  # noqa: E402
 import utils.graspnet_utils as graspnet_utils  # noqa: E402
 from utils.camera_utils import compose_cam_to_base_transform, configure_camera, load_config, load_hand_eye  # noqa: E402
 from utils.transforms import (  # noqa: E402
@@ -68,23 +69,68 @@ from utils.yolo_utils import (  # noqa: E402
     load_yolo as load_yolo_from_config,
 )
 from graspnetAPI import Grasp, GraspGroup  # noqa: E402
+from reBotArm_control_py.kinematics import (  # noqa: E402
+    get_end_effector_frame_id,
+    load_robot_model,
+    pad_q_for_model,
+    pos_rot_to_se3,
+    solve_ik,
+)
+from reBotArm_control_py.kinematics.inverse_kinematics import IKParams  # noqa: E402
 
 
-def _move_ready(robot: RebotArm, ready_cfg: dict[str, Any]) -> None:
+def _wait_motion(controller: RebotArmEndPose, duration: float, extra: float = 0.6) -> None:
+    thread = getattr(controller, "_send_thread", None)
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=duration + extra + 2.0)
+    else:
+        time.sleep(duration + extra)
+
+
+def _move_ready(controller: RebotArmEndPose, ready_cfg: dict[str, Any]) -> None:
     duration = float(ready_cfg.get("duration", 3.0))
-    robot.move_to(
-        float(ready_cfg.get("x", 0.25)),
-        float(ready_cfg.get("y", 0.0)),
-        float(ready_cfg.get("z", 0.35)),
-        float(ready_cfg.get("roll", 0.0)),
-        float(ready_cfg.get("pitch", 1.2)),
-        float(ready_cfg.get("yaw", 0.0)),
+    controller.move_to_traj(
+        x=float(ready_cfg.get("x", 0.25)),
+        y=float(ready_cfg.get("y", 0.0)),
+        z=float(ready_cfg.get("z", 0.35)),
+        roll=float(ready_cfg.get("roll", 0.0)),
+        pitch=float(ready_cfg.get("pitch", 1.2)),
+        yaw=float(ready_cfg.get("yaw", 0.0)),
         duration=duration,
     )
-    robot.wait_motion(duration)
+    _wait_motion(controller, duration)
+
+
+class IkChecker:
+    def __init__(self, arm: RebotArm) -> None:
+        self._arm = arm
+        self._arm_group = arm.groups.get("arm")
+        if self._arm_group is None:
+            raise ValueError("硬件配置缺少 groups.arm")
+        self._n = self._arm_group.num_joints
+        self._model = load_robot_model()
+        self._data = self._model.createData()
+        self._end_frame_id = get_end_effector_frame_id(self._model)
+        self._params = IKParams(max_iter=200, tolerance=1e-4, step_size=0.5, damping=1e-6)
+
+    def check(self, x: float, y: float, z: float, roll: float, pitch: float, yaw: float) -> tuple[bool, float]:
+        q_now = self._arm.get_state()[0][: self._n]
+        q_init = pad_q_for_model(self._model, q_now, self._n)
+        target = pos_rot_to_se3(np.array([x, y, z], dtype=np.float64), roll=roll, pitch=pitch, yaw=yaw)
+        result = solve_ik(
+            self._model,
+            self._data,
+            self._end_frame_id,
+            target,
+            q_init,
+            self._params,
+            controlled_joints=self._n,
+        )
+        return bool(result.success), float(result.error)
 
 def _execute_grasp(
-    robot: RebotArm,
+    controller: RebotArmEndPose,
+    grasp_driver: GraspDriver,
     grasp6d: tuple[float, ...],
     pre6d: tuple[float, ...],
     retreat6d: tuple[float, ...],
@@ -104,30 +150,30 @@ def _execute_grasp(
         return False
 
     print("[Grasp] 打开夹爪...")
-    robot.open_gripper()
+    grasp_driver.open_gripper()
 
     print("[Grasp] 移动到预夹取位...")
-    if not robot.move_to(xp, yp, zp, rxp, ryp, rzp, duration=2.0):
+    if not controller.move_to_traj(xp, yp, zp, rxp, ryp, rzp, duration=2.0):
         print("[Grasp] 预夹取 IK 失败，中止")
         return False
-    robot.wait_motion(2.0)
+    _wait_motion(controller, 2.0)
 
     print("[Grasp] 移动到夹取位...")
-    if not robot.move_to(xg, yg, zg, rxg, ryg, rzg, duration=1.5):
+    if not controller.move_to_traj(xg, yg, zg, rxg, ryg, rzg, duration=1.5):
         print("[Grasp] 夹取 IK 失败，中止")
         return False
-    robot.wait_motion(1.5)
+    _wait_motion(controller, 1.5)
 
     print("[Grasp] 夹取中...")
-    ok = robot.grasp()
+    ok = grasp_driver.grasp()
     print("[Grasp] 夹取成功，力控保持中" if ok else "[Grasp] 空夹取")
 
     print("[Grasp] 退回预夹取位...")
-    if robot.move_to(xr, yr, zr, rxr, ryr, rzr, duration=1.5):
-        robot.wait_motion(1.5)
+    if controller.move_to_traj(xr, yr, zr, rxr, ryr, rzr, duration=1.5):
+        _wait_motion(controller, 1.5)
 
     print("[Grasp] 返回预备位...")
-    _move_ready(robot, ready_cfg)
+    _move_ready(controller, ready_cfg)
     return ok
 
 
@@ -155,7 +201,7 @@ def _pose_z_ok(pose6d: tuple[float, ...], min_z: float) -> bool:
 
 
 def _select_executable_grasp(
-    robot: RebotArm,
+    ik_checker: IkChecker,
     grasps: GraspGroup,
     T_cam2base: np.ndarray,
     pregrasp_offset_m: float,
@@ -181,8 +227,8 @@ def _select_executable_grasp(
             skipped_low += 1
             continue
 
-        pre_ok, pre_err = robot.check_ik(*pre6d)
-        grasp_ok, grasp_err = robot.check_ik(*grasp6d) if pre_ok else (False, pre_err)
+        pre_ok, pre_err = ik_checker.check(*pre6d)
+        grasp_ok, grasp_err = ik_checker.check(*grasp6d) if pre_ok else (False, pre_err)
         worst_err = max(worst_err, pre_err, grasp_err)
         if pre_ok and grasp_ok:
             print(f"[G] 选择可执行候选 rank={idx + 1}/{len(ranked)} score={grasp.score:.4f}")
@@ -256,16 +302,21 @@ def main() -> int:
     )
 
     print("=== 初始化机械臂 ===")
-    robot = RebotArm(
-        repo_root=robot_cfg.get("repo_root"),
+    selected = selected_arm_config(robot_cfg.get("repo_root"))
+    rebotarm = RebotArm()
+    controller = RebotArmEndPose(rebotarm, arm_control_mode=selected.controller_mode)
+    grasp_driver = GraspDriver(
+        rebotarm,
+        controller,
         gripper_config=robot_cfg.get("gripper"),
-        control_config=robot_cfg.get("control"),
+        repo_root=robot_cfg.get("repo_root"),
     )
-    robot.connect(enable=True)
-    robot.init_gripper()
+    controller.start()
+    ik_checker = IkChecker(rebotarm)
+    print(f"[Robot] 控制模式: {selected.controller_mode}")
 
     print("[Robot] 移动到预备位置...")
-    _move_ready(robot, ready_cfg)
+    _move_ready(controller, ready_cfg)
 
     cam_type = str(cfg.get("camera", {}).get("type", "")).lower()
     T_hand_eye, hand_eye_mode = load_hand_eye(PROJECT_ROOT, cam_type)
@@ -391,7 +442,7 @@ def main() -> int:
                             else graspnet_cfg.get("target_margin_px", 12)
                         ),
                         target_expand_ratio=target_expand_ratio,
-                        max_grasp_width_m=rebot_arm._G_MAX_DIST_M,
+                        max_grasp_width_m=GRIPPER_MAX_DISTANCE_M,
                     )
                 except Exception as exc:
                     status = f"inference failed: {exc}"
@@ -439,9 +490,9 @@ def main() -> int:
                     print("[G] 手眼标定不可用，无法执行夹取")
                     continue
 
-                T_cam2base = compose_cam_to_base_transform(robot.get_tcp_pose(), T_hand_eye, cfg)
+                T_cam2base = compose_cam_to_base_transform(grasp_driver.get_tcp_pose(), T_hand_eye, cfg)
                 selected = _select_executable_grasp(
-                    robot,
+                    ik_checker,
                     result.grasps,
                     T_cam2base,
                     pregrasp_offset_m,
@@ -459,7 +510,8 @@ def main() -> int:
                 last_display = snap_display
 
                 _execute_grasp(
-                    robot,
+                    controller,
+                    grasp_driver,
                     grasp6d,
                     pre6d,
                     retreat6d,
@@ -474,11 +526,13 @@ def main() -> int:
     finally:
         print("\n[退出] 释放夹爪并回零...")
         try:
-            robot.release_gripper()
-            robot.safe_home()
+            grasp_driver.release_gripper()
         except Exception as exc:
             print(f"[退出] {exc}")
-        robot.disconnect(safe_home=False)
+        try:
+            controller.end()
+        except Exception as exc:
+            print(f"[退出] {exc}")
         try:
             cam.close()
         except Exception:

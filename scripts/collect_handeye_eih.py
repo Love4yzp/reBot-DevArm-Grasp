@@ -33,7 +33,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("QT_QPA_FONTDIR", "/usr/share/fonts/truetype")
 
 from drivers.camera import make_camera
-from drivers.robot import RebotArm, ensure_rebot_sdk_in_syspath
+from drivers.robot.grasp_driver import GraspDriver, selected_arm_config
+from reBotArm_control_py.actuator import RebotArm
+from reBotArm_control_py.controllers import RebotArmEndPose
 from calibration.hand_eye import CalibMode, HandEyeCalibrator
 
 
@@ -151,9 +153,7 @@ class GravityCompController:
     V_THRESH  = 0.04   # 末端线速度阈值 (m/s)
     W_THRESH  = 0.08   # 末端角速度阈值 (rad/s)
 
-    def __init__(self, repo_root: str | None = None) -> None:
-        ensure_rebot_sdk_in_syspath(repo_root)
-
+    def __init__(self) -> None:
         from reBotArm_control_py.actuator import RebotArm as DriverRebotArm
         from reBotArm_control_py.controllers import RebotArmEndPose
         from reBotArm_control_py.dynamics import compute_generalized_gravity
@@ -350,7 +350,9 @@ def main():
     # ── 机器人 ──
     mode_str  = "手动（重力补偿）" if args.manual else f"自动（{len(CALIB_POSES_XYZ)} 个预设姿态）"
     gc_ctrl: GravityCompController | None = None
-    robot: RebotArm | None = None
+    rebotarm: RebotArm | None = None
+    controller: RebotArmEndPose | None = None
+    grasp_driver: GraspDriver | None = None
     auto = {
         "enabled": not args.manual,
         "idx": 0,
@@ -385,19 +387,25 @@ def main():
 
     robot_cfg = cfg.get("robot", {})
     try:
-        ensure_rebot_sdk_in_syspath(robot_cfg.get("repo_root"))
         if args.manual:
-            gc_ctrl = GravityCompController(repo_root=robot_cfg.get("repo_root"))
+            gc_ctrl = GravityCompController()
             gc_ctrl.start()
             print(f"[机器人] 手动模式就绪 — 推动机械臂定位后按 Enter 采集")
         else:
-            robot = RebotArm(
-                repo_root=robot_cfg.get("repo_root"),
+            selected = selected_arm_config(robot_cfg.get("repo_root"))
+            rebotarm = RebotArm()
+            controller = RebotArmEndPose(rebotarm, arm_control_mode=selected.controller_mode)
+            grasp_driver = GraspDriver(
+                rebotarm,
+                controller,
                 gripper_config=robot_cfg.get("gripper"),
-                control_config=robot_cfg.get("control"),
+                repo_root=robot_cfg.get("repo_root"),
             )
-            robot.connect(enable=True)
-            print(f"[机器人] 自动模式就绪，共 {len(CALIB_POSES_XYZ)} 个预设姿态，将自动遍历采集")
+            controller.start()
+            print(
+                f"[机器人] 自动模式就绪，控制模式: {selected.controller_mode}，"
+                f"共 {len(CALIB_POSES_XYZ)} 个预设姿态，将自动遍历采集"
+            )
     except Exception as e:
         try:
             cam.close()
@@ -425,7 +433,7 @@ def main():
         if args.manual:
             return gc_ctrl.get_tcp_pose()
         else:
-            return robot.get_tcp_pose()
+            return grasp_driver.get_tcp_pose()
 
     def _print_fk() -> None:
         try:
@@ -487,7 +495,7 @@ def main():
             return False
 
     def start_next_auto_pose() -> bool:
-        if not auto["enabled"] or robot is None:
+        if not auto["enabled"] or controller is None:
             return False
 
         total = len(CALIB_POSES_XYZ)
@@ -496,7 +504,7 @@ def main():
             x, y, z, roll, pitch, yaw = CALIB_POSES_XYZ[idx]
             print(f"\n[自动] 姿态 {idx+1}/{total}: "
                   f"pos=({x:.2f},{y:.2f},{z:.2f}) rpy=({roll:.2f},{pitch:.2f},{yaw:.2f})")
-            ok = robot.move_to(x, y, z, roll=roll, pitch=pitch, yaw=yaw, duration=AUTO_MOVE_DURATION_S)
+            ok = controller.move_to_traj(x, y, z, roll=roll, pitch=pitch, yaw=yaw, duration=AUTO_MOVE_DURATION_S)
             if ok:
                 now = time.monotonic()
                 auto["pose_idx"] = idx
@@ -666,11 +674,11 @@ def main():
         cam.close()
         if gc_ctrl is not None:
             gc_ctrl.safe_home()
-        elif robot is not None:
+        elif controller is not None:
             try:
-                robot.disconnect()
-            except Exception:
-                pass
+                controller.end()
+            except Exception as e:
+                print(f"[机器人] 断开失败: {e}")
         compute_and_save(finish_reason)
 
     print(f"\n结束，共 {calibrator.n_samples} 个样本。")
