@@ -153,7 +153,7 @@ class GravityCompController:
     V_THRESH  = 0.04   # End-effector linear velocity threshold (m/s)
     W_THRESH  = 0.08   # End-effector angular velocity threshold (rad/s)
 
-    def __init__(self, arm: RebotArm, controller: RebotArmEndPose) -> None:
+    def __init__(self, arm: RebotArm) -> None:
         from reBotArm_control_py.dynamics import compute_generalized_gravity
         from reBotArm_control_py.kinematics import (
             load_robot_model, get_end_effector_frame_id,
@@ -166,7 +166,6 @@ class GravityCompController:
         self._pin = pin
 
         self._arm = arm
-        self._controller = controller
         if not self._arm.has_gripper:
             raise ValueError(
                 "Hardware config is missing groups.gripper. "
@@ -178,7 +177,7 @@ class GravityCompController:
         self._ee_id = get_end_effector_frame_id(self._model)
 
         self._n = None          # Joint count, set after connect.
-        self._q_target = None   # Lock target, stored as list[ndarray] for sharing.
+        self._q_target = None
         self._integral = None
         self._gc_running = threading.Event()
         self._io_lock = threading.RLock()
@@ -201,8 +200,8 @@ class GravityCompController:
         self._wait_state_valid()
         with self._io_lock:
             q0 = self._arm.get_state()[0][:n]
-        self._q_target = [q0.copy()]
-        self._integral = [np.zeros(n)]
+        self._q_target = q0.copy()
+        self._integral = np.zeros(n)
 
         print(f"[GravityComp] MIT mode, kp={self.KP} kd={self.KD}. Move the arm by hand.")
 
@@ -224,10 +223,33 @@ class GravityCompController:
             time.sleep(0.02)
         raise RuntimeError("[GravityComp] Arm feedback is not ready")
 
-    def stop(self) -> None:
-        """Stop the gravity compensation control loop."""
+    def safe_home(self) -> None:
+        """Stop gravity compensation, home with an SDK controller, then disconnect."""
         self._gc_running.clear()
-        self._arm.stop_control_loop()
+        try:
+            print("[GravityComp] Homing...")
+            self._arm.stop_control_loop()
+            with self._io_lock:
+                q_now = self._arm.get_state()[0][: self._n]
+                g_now = self._arm.gripper.get_positions()
+
+            ctrl = RebotArmEndPose(
+                self._arm,
+                arm_control_mode="mit",
+                use_gravity_ff=True,
+            )
+            ctrl.set_gripper_target(float(g_now[0]) if g_now.size else 0.0)
+            ctrl._q_target[:] = q_now
+            ctrl.start()
+            ctrl.safe_home()
+            self._arm.stop_control_loop()
+        except Exception as e:
+            print(f"[GravityComp] Homing failed: {e}")
+        try:
+            self._arm.disconnect()
+        except Exception:
+            pass
+        print("[GravityComp] Disconnected")
 
     def _worker(self, r, dt: float) -> None:
         if not self._gc_running.is_set():
@@ -246,9 +268,9 @@ class GravityCompController:
             q_model = self._pad_q_for_model(model, q, n)
             tau_g = self._compute_gravity(model=model, q=q_model)[:n]
 
-            q_err = self._q_target[0] - q
-            self._integral[0] += q_err * 1.0
-            np.clip(self._integral[0], -0.5, 0.5, out=self._integral[0])
+            q_err = self._q_target - q
+            self._integral += q_err
+            np.clip(self._integral, -0.5, 0.5, out=self._integral)
 
             qd_model = np.zeros(model.nv)
             qd_model[: min(model.nv, n)] = qd[: min(model.nv, n)]
@@ -259,16 +281,16 @@ class GravityCompController:
 
             if (np.linalg.norm(v[:3]) > self.V_THRESH or
                     np.linalg.norm(v[3:]) > self.W_THRESH):
-                self._q_target[0] = q.copy()
-                self._integral[0] *= 0.9
+                self._q_target = q.copy()
+                self._integral *= 0.9
 
             with self._io_lock:
                 r.arm.send_mit(
-                    pos=self._q_target[0],
+                    pos=self._q_target,
                     vel=np.zeros(n),
                     kp=np.full(n, KP),
                     kd=np.full(n, KD),
-                    tau=tau_g + self._integral[0],
+                    tau=tau_g + self._integral,
                 )
                 r.gripper.send_mit(r.gripper.get_positions())
         except Exception:
@@ -310,6 +332,8 @@ def main():
     rebotarm: RebotArm | None = None
     controller: RebotArmEndPose | None = None
     grasp_driver: GraspDriver | None = None
+    auto_controller_mode: str | None = None
+    auto_use_gravity_ff = False
     auto = {
         "enabled": not args.manual,
         "idx": 0,
@@ -321,7 +345,7 @@ def main():
         "status": "waiting to start",
         "finished": False,
     }
-    result_saved = [False]
+    result_saved = False
 
     print(f"\n=== Eye-in-Hand Calibration ===")
     print(f"Camera: {cam_type}  |  Mode: {mode_str}  |  Solver: {he_method}")
@@ -353,12 +377,14 @@ def main():
                 gripper_config=robot_cfg.get("gripper"),
                 repo_root=robot_cfg.get("repo_root"),
             )
-            gc_ctrl = GravityCompController(rebotarm, controller)
+            gc_ctrl = GravityCompController(rebotarm)
             gc_ctrl.start()
             print("[Robot] Manual mode ready. Move the arm by hand, then press Enter to capture.")
         else:
             selected = selected_arm_config(robot_cfg.get("repo_root"))
-            controller = RebotArmEndPose(rebotarm, arm_control_mode=selected.controller_mode)
+            auto_controller_mode = selected.controller_mode
+            auto_use_gravity_ff = auto_controller_mode == "mit"
+            controller = RebotArmEndPose(rebotarm, arm_control_mode=auto_controller_mode)
             grasp_driver = GraspDriver(
                 rebotarm,
                 controller,
@@ -384,7 +410,7 @@ def main():
         print("[Controls] Auto traversal and capture  c/q=stop and solve  pos=print current TCP pose")
     print()
 
-    latest_pose = [None]
+    latest_pose = None
     line_queue: queue.Queue | None = None
     if sys.stdin.isatty():
         line_queue = queue.Queue()
@@ -427,6 +453,7 @@ def main():
             return False
 
     def compute_and_save(reason: str) -> bool:
+        nonlocal result_saved
         print(f"\n[Finish] {reason}")
         if calibrator.n_samples < MIN_CALIB_SAMPLES:
             print(f"[Result] Not enough samples ({calibrator.n_samples} < {MIN_CALIB_SAMPLES}); calibration was not solved")
@@ -445,7 +472,7 @@ def main():
             print(f"[Result] [OK] Saved to {save_path}")
             if calibrator.n_samples < 15:
                 print("[Result] Tip: fewer than 15 samples; collect more samples for better accuracy")
-            result_saved[0] = True
+            result_saved = True
             return True
         except Exception as e:
             print(f"[Result] [Error] Solve failed: {e}")
@@ -527,6 +554,33 @@ def main():
 
         return False
 
+    def safe_home_and_disconnect() -> None:
+        """Stop active control, return home with a fresh SDK controller, then disconnect."""
+        if rebotarm is None or auto_controller_mode is None:
+            return
+        try:
+            print("[Robot] Homing and disconnecting...")
+            rebotarm.stop_control_loop()
+            q_now = rebotarm.get_state()[0][: rebotarm.arm.num_joints]
+            g_now = rebotarm.gripper.get_positions() if rebotarm.has_gripper else np.array([])
+
+            ctrl = RebotArmEndPose(
+                rebotarm,
+                arm_control_mode=auto_controller_mode,
+                use_gravity_ff=auto_use_gravity_ff,
+            )
+            ctrl.set_gripper_target(float(g_now[0]) if g_now.size else 0.0)
+            ctrl._q_target[:] = q_now
+            ctrl.start()
+            ctrl.safe_home()
+            rebotarm.stop_control_loop()
+        except Exception as e:
+            print(f"[Robot] Homing failed: {e}")
+        try:
+            rebotarm.disconnect()
+        except Exception:
+            pass
+
     def handle_line(raw: str) -> bool:
         if raw is None:
             print("\n[Interrupt] Terminal input closed; stopping and trying to solve")
@@ -542,7 +596,7 @@ def main():
             return False
 
         if args.manual and line == "":
-            capture_sample(latest_pose[0], "manual capture")
+            capture_sample(latest_pose, "manual capture")
             return False
 
         if line:
@@ -562,7 +616,7 @@ def main():
             bgr, _ = cam.get_frame()
             if bgr is not None:
                 pose = cam.detect_aruco(bgr)
-                latest_pose[0] = pose
+                latest_pose = pose
                 if tick_auto(pose):
                     finish_reason = "auto traversal completed"
                 vis  = cam.draw_aruco(bgr)
@@ -630,26 +684,13 @@ def main():
         cv2.destroyAllWindows()
         cam.close()
         if gc_ctrl is not None:
-            try:
-                gc_ctrl.stop()
-            except Exception as e:
-                print(f"[GravityComp] Stop failed: {e}")
-        if controller is not None:
-            try:
-                print("[Robot] Homing and disconnecting...")
-                if not getattr(controller, "_running", False):
-                    q_now = rebotarm.get_state()[0][: rebotarm.arm.num_joints]
-                    g_now = rebotarm.gripper.get_positions()
-                    controller.set_gripper_target(float(g_now[0]) if g_now.size else 0.0)
-                    controller._q_target[:] = q_now
-                    controller.start()
-                controller.end()
-            except Exception as e:
-                print(f"[Robot] Disconnect failed: {e}")
+            gc_ctrl.safe_home()
+        elif controller is not None:
+            safe_home_and_disconnect()
         compute_and_save(finish_reason)
 
     print(f"\nDone, total samples: {calibrator.n_samples}.")
-    if calibrator.n_samples > 0 and not result_saved[0]:
+    if calibrator.n_samples > 0 and not result_saved:
         print("Tip: hand_eye.npz was not generated; collect more samples and try again.")
 
 
