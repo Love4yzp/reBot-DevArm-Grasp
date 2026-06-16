@@ -1,4 +1,4 @@
-# 🦾 reBot Arm B601-DM 视觉夹取 Demo
+# 🦾 reBot Arm B601 视觉夹取 Demo
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Seeed-Projects/reBot-DevArm/main/media/v1.0.png" alt="reBot Arm B601">
@@ -10,7 +10,7 @@
     </a>
     <img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python Version">
     <img src="https://img.shields.io/badge/Platform-Ubuntu%2022.04+-orange.svg" alt="Platform">
-    <img src="https://img.shields.io/badge/Camera-Orbbec%20Gemini%202-green.svg" alt="Camera">
+    <img src="https://img.shields.io/badge/Camera-RGB--D-green.svg" alt="Camera">
     <img src="https://img.shields.io/badge/Detection-YOLO-yellow.svg" alt="YOLO">
 </p>
 
@@ -29,11 +29,11 @@
 
 ## 📖 项目介绍
 
-**reBot Arm B601-DM 视觉夹取 Demo** 是基于 [reBot Arm B601](https://github.com/vectorBH6/reBotArm_control_py) 机械臂控制库与奥比中光 **Gemini 2** 深度相机的视觉抓取算法演示项目。系统通过 YOLO 模型实时识别桌面物体，利用 OBB 最小外接矩形估计夹取姿态，经手眼标定将相机坐标系下的抓取点变换到机械臂基坐标系，最终驱动机械臂完成自主抓取。
+**reBot Arm B601 视觉夹取 Demo** 是基于 [reBot Arm B601](https://github.com/vectorBH6/reBotArm_control_py) 机械臂控制库与 RGB-D 深度相机的视觉抓取算法演示项目。系统支持 B601 的 DM 与 RS 两种机械臂配置，通过 YOLO 模型实时识别桌面物体，利用 OBB 最小外接矩形估计夹取姿态，经手眼标定将相机坐标系下的抓取点变换到机械臂基坐标系，最终驱动机械臂完成自主抓取。
 
 ### ✨ 核心功能
 
-- 📷 **深度感知** — Orbbec Gemini 2 提供对齐的 RGB + 深度帧（1280×720 @ 30fps）
+- 📷 **深度感知** — 支持 Orbbec Gemini 2 与 RealSense D435i / D405 等 RGB-D 深度相机
 - 🔍 **目标检测** — 基于 YOLO 模型识别，支持开放词汇自定义类别
 - 📐 **姿态估计** — OBB 最小外接矩形短轴方向估计夹爪朝向，深度分位数估计抓取高度
 - 🔄 **坐标变换** — TSAI 手眼标定（Eye-in-Hand），将相机系抓取点变换到机械臂基坐标系
@@ -45,19 +45,19 @@
 
 | 组件 | 型号 / 要求 |
 |------|------------|
-| 机械臂 | reBot Arm B601-DM（DAMIAO 电机版） |
-| 深度相机 | Orbbec Gemini 2 |
+| 机械臂 | reBot Arm B601（DM / RS 两种配置） |
+| 深度相机 | Orbbec Gemini 2、Intel RealSense D435i / D405 |
 | 通信接口 | USB2CAN 串口桥接器（机械臂）；USB 3.0（相机） |
 | 主机 | Ubuntu 22.04+，Python 3.10，x86_64 |
 
 **接线说明**
 
-1. 将 Gemini 2 通过 USB 3.0 连接到主机
+1. 将深度相机通过 USB 3.0 连接到主机
 2. 将 USB2CAN 适配器连接到机械臂 CAN 总线并插入主机 USB 口
 3. 配置设备权限：
 
 ```bash
-sudo chmod a+rw /dev/bus/usb/*/*   # Orbbec 相机
+sudo chmod a+rw /dev/bus/usb/*/*   # 深度相机 USB 权限
 sudo chmod 666 /dev/ttyUSB0        # USB2CAN（端口号按实际调整）
 ```
 
@@ -91,17 +91,33 @@ conda activate rebotarm
 ### Step 3. 安装机械臂控制库
 
 ```bash
-git clone https://github.com/vectorBH6/reBotArm_control_py.git sdk/reBotArm_control_py
-cd sdk/reBotArm_control_py
+git clone https://github.com/vectorBH6/reBotArm_control_py.git ../reBotArm_control_py
+cd ../reBotArm_control_py
 pip install -e .
-cd ../..
+cd ../rebot_grasp
 ```
+
+B601 的 DM 与 RS 两种机械臂配置通过 SDK 仓库中的配置文件切换。请在 `reBotArm_control_py/config/rebotarm.yaml` 中修改 `hardware_yaml`，选择对应的硬件配置，例如：
+
+```yaml
+hardware_yaml: rebotarm_dm.yaml
+```
+
+或：
+
+```yaml
+hardware_yaml: rebotarm_rs.yaml
+```
+
+视觉抓取程序会读取该 SDK 配置，并自动选择对应的机械臂控制模式与夹爪参数。
 
 ### Step 4. 安装深度相机 SDK
 
-**本项目使用Orbbec Gemini2 深度相机，用户可根据自身情况选择合适的深度相机安装对应的SDK后，可跳过本步骤。**
+本项目支持 Orbbec Gemini 2 与 RealSense D435i / D405 等 RGB-D 深度相机。请根据实际使用的相机安装对应 SDK；如果当前环境已经能正常导入相机驱动，可跳过本步骤。
 
-Orbbec Gemini2 深度相机依赖 **pyorbbecsdk**（Orbbec SDK v2 的 Python 版本）。优先推荐直接安装预编译 Python 包：
+**Orbbec Gemini 2**
+
+Orbbec Gemini 2 依赖 **pyorbbecsdk**（Orbbec SDK v2 的 Python 版本）。优先推荐直接安装预编译 Python 包：
 
 **方式一：通过 pip 安装（推荐）**
 
@@ -136,7 +152,18 @@ git clone https://gitee.com/orbbecdeveloper/pyorbbecsdk.git
 python -c "import pyorbbecsdk; print('pyorbbecsdk OK')"
 ```
 
-**配置 udev 规则（首次使用必须）**
+**RealSense D435i / D405**
+
+RealSense 相机依赖 `pyrealsense2`。通常可以直接通过 pip 安装：
+
+```bash
+pip install pyrealsense2
+python -c "import pyrealsense2; print('pyrealsense2 OK')"
+```
+
+如果系统需要完整的 RealSense 工具链或 udev 规则，请参考 RealSense SDK 官方文档安装 `librealsense2`。
+
+**Orbbec udev 规则（首次使用必须）**
 
 ```bash
 cd sdk/pyorbbecsdk
@@ -162,6 +189,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 | pyorbbecsdk | https://github.com/orbbec/pyorbbecsdk |
 | pyorbbecsdk 文档 | https://orbbec.github.io/pyorbbecsdk/index.html |
 | ROS2 Wrapper | https://github.com/orbbec/OrbbecSDK_ROS2/tree/v2-main |
+| Intel RealSense SDK | https://github.com/realsenseai/librealsense |
 
 ### Step 5. 配置 GraspNet（可选）
 
@@ -216,7 +244,7 @@ cd ../../..
 
 ***如果编译时报 `fatal error: cusparse.h: No such file or directory`，先运行 `find $CONDA_PREFIX -name cusparse.h`，并把包含 `cusparse.h` 的目录加入 `CPATH` / `CPLUS_INCLUDE_PATH`。如果 CUDA 头文件来自 conda `cuda-toolkit`，路径通常是 `$CONDA_PREFIX/targets/x86_64-linux/include`，而不是上面示例里的 pip `nvidia/cu13/include` 路径。***
 
-***此外，GraspNet API 的旧版依赖中可能仍使用已弃用的 `sklearn` 包名。上面的 `sed` 命令会将 `sklearn` 替换为 `scikit-learn`，避免安装时报 `The 'sklearn' PyPI package is deprecated`。除非同步升级 GraspNet API 的旧依赖，否则建议保留其 `numpy==1.23.4` 约束，因为 `transforms3d==0.3.1` 仍使用 `np.float` 等旧 NumPy 别名。***
+***此外，GraspNet API 的依赖中可能仍使用 `sklearn` 包名。上面的 `sed` 命令会将 `sklearn` 替换为 `scikit-learn`，避免安装时出现包名提示。除非同步调整 GraspNet API 的依赖栈，否则建议保留其 `numpy==1.23.4` 约束，因为 `transforms3d==0.3.1` 仍使用 `np.float` 等 NumPy 别名。***
 
 参考 graspnet-baseline 官方仓库下载 GraspNet 官方预训练权重后，将 `checkpoint-rs.tar` 放到：
 
@@ -242,7 +270,7 @@ rebot_grasp/
 ├── config/
 │   ├── default.yaml              # 主配置文件
 │   └── calibration/
-│       └── orbbec_gemini2/
+│       └── <camera_type>/
 │           ├── intrinsics.npz    # 相机内参
 │           └── hand_eye.npz      # 手眼标定结果
 ├── drivers/
@@ -251,7 +279,7 @@ rebot_grasp/
 │   │   ├── orbbec_gemini2.py     # Gemini 2 驱动
 │   │   └── realsense.py          # RealSense 驱动（备用）
 │   └── robot/
-│       └── rebot_arm.py          # reBotArm 封装 + 夹爪状态机
+│       └── grasp_driver.py       # 基于机械臂 SDK 的轻量抓取辅助
 ├── calibration/
 │   ├── aruco_pose.py             # ArUco 位姿估计
 │   └── hand_eye.py               # 手眼标定求解
@@ -293,16 +321,35 @@ calibration:
     dict_id: 0
     target_marker_id: 0
   hand_eye_method: TSAI
+  hand_eye_compensation_m:
+    x: 0.0
+    y: 0.0
+    z: 0.0
 
 detection:
   conf_threshold: 0.5
   iou_threshold: 0.45
 
 robot:
-  repo_root: null   # 自动识别 sdk/reBotArm_control_py
-  config_path: null
-  urdf_path: null
-  pose_convention: xyz_euler_rad
+  repo_root: null
+  control:
+    dm:
+      arm_control_mode: posvel
+    rs:
+      arm_control_mode: mit
+  gripper:
+    dm:
+      angle_open: 5.0
+      counterclockwise: true
+      tau_max: 1.5
+      close_torque: 1.0
+      default_force: 0.30
+    rs:
+      angle_open: 5.0
+      counterclockwise: false
+      tau_max: 1.5
+      close_torque: 1.0
+      default_force: 0.10
   ready_pose:
     x: 0.3
     y: 0.0
@@ -336,11 +383,14 @@ grasp_pipeline:
 - `camera.type`：相机类型，可选 `realsense_d435i`、`realsense_d405`、`orbbec_gemini2`。
 - `camera.serial`：指定设备序列号；`null` 表示使用第一台可用设备。
 - `calibration.aruco.marker_length_m`：手眼标定用 ArUco 边长，单位米。
+- `calibration.hand_eye_compensation_m`：手眼标定后的 XYZ 手动平移补偿，作用在机器人基坐标系下，单位为米。三项全为 `0.0` 时，补偿矩阵为单位矩阵。
 - `detection.conf_threshold`：YOLO 检测置信度阈值。
 - `detection.iou_threshold`：YOLO NMS IoU 阈值。
-- `robot.repo_root`：`reBotArm_control_py` 仓库根目录；`null` 时自动查找 `rebot_grasp/sdk/reBotArm_control_py`
-- `robot.config_path` / `robot.urdf_path`：机械臂控制配置和 URDF；`null` 表示使用 SDK 默认值。
+- `robot.repo_root`：`reBotArm_control_py` 仓库根目录；
+- `robot.control.dm` / `robot.control.rs`：按 SDK 当前硬件配置自动选择的控制模式覆写。默认 DM 使用 `posvel`，RS 使用 `mit`。
+- `robot.gripper.dm` / `robot.gripper.rs`：按 SDK 当前硬件配置自动选择的两组夹爪参数。`angle_open`、`close_torque`、`default_force` 均填写正数数值；`counterclockwise` 表示闭合时采用的电机转动方向，代码会据此推导张开角度和闭合力矩的符号。`tau_max` 为力矩上限。其余夹爪行为参数在 `drivers/robot/grasp_driver.py` 中定义。
 - `robot.ready_pose`：启动后先到达的预备位，抓取结束后也会回到这里。
+- 切换 DM/RS 机械臂：在 SDK 的 `reBotArm_control_py/config/rebotarm.yaml` 中修改 `hardware_yaml`，选择 `rebotarm_dm.yaml` 或 `rebotarm_rs.yaml`。
 - `grasp_pipeline.infer_every_live`：实时预览时每 N 帧跑一次检测，减轻 CPU/GPU 压力。
 - `grasp_pipeline.grasp.depth_quantile`：短轴抓取管线使用的深度分位数，值越大通常抓取点越深。
 - `grasp_pipeline.grasp.pregrasp_offset_m`：预抓取位相对最终抓取位，沿末端进给方向回退的距离，单位米。
@@ -430,7 +480,7 @@ Eye-in-Hand 模式手眼标定，支持自动遍历采样和手动重力补偿�
 ```bash
 conda activate rebotarm
 conda env update -n rebotarm -f environment.yml
-cd sdk/reBotArm_control_py && pip install -e .
+cd ../reBotArm_control_py && pip install -e .
 ```
 
 ### 2. 按 `G` 后不执行抓取
@@ -474,7 +524,7 @@ pip install . --no-build-isolation
 python -c "from pointnet2 import pointnet2_utils; print('Submodule import works')"
 ```
 
-### 5. 针对新显卡运行 GraspNet 时出现 CUDA 架构不兼容
+### 5. 当前显卡运行 GraspNet 时出现 CUDA 架构不兼容
 
 如果出现 `no kernel image is available for execution on the device` 或 PyTorch 提示当前 GPU 的 CUDA capability 不受支持，通常说明当前 PyTorch wheel 不包含该显卡架构对应的 CUDA kernel。建议安装支持当前 CUDA/显卡架构的 PyTorch 版本，然后重新编译 GraspNet 的本地 CUDA 扩展。
 
@@ -509,6 +559,7 @@ python -c "import torch; print(torch.cuda.is_available())"
 - [Orbbec Gemini 2 产品页](https://www.orbbec.com.cn/index/Product/info.html?cate=38&id=51)
 - [Orbbec SDK v2](https://github.com/orbbec/OrbbecSDK_v2)
 - [pyorbbecsdk](https://github.com/orbbec/pyorbbecsdk)
+- [RealSense SDK](https://github.com/realsenseai/librealsense)
 - [graspnet/graspnet-baseline](https://github.com/graspnet/graspnet-baseline)
 - [Ultralytics YOLOv11](https://github.com/ultralytics/ultralytics)
 

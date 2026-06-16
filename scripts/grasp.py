@@ -2,11 +2,12 @@
 grasp.py - 基于 GraspNet 的机械臂视觉夹取主程序
 ================================================
 流程：
-  1. 初始化机械臂、夹爪和 RGB-D 相机，移动到预备位
-  2. YOLO 选择目标，GraspNet 在当前 RGB-D 帧上估计 6D 夹取姿态
-  3. G/SPACE 键：冻结当前帧并执行夹取（--dry-run 只打印坐标）
-  4. R 键：恢复实时预览
-  5. Q/ESC 键：退出，释放夹爪并回零位
+  1. 初始化 RGB-D 相机，确认图像流可用
+  2. 机械臂 + 夹爪使能，移动到预备位
+  3. YOLO 选择目标，GraspNet 在当前 RGB-D 帧上估计 6D 夹取姿态
+  4. G/SPACE 键：冻结当前帧并执行夹取（--dry-run 只打印坐标）
+  5. R 键：恢复实时预览
+  6. Q/ESC 键：退出，释放夹爪并回零位
 
 用法：
   conda activate seeed
@@ -53,10 +54,11 @@ def _prepare_imports() -> None:
 _prepare_imports()
 
 from drivers.camera import make_camera  # noqa: E402
-from drivers.robot.rebot_arm import RebotArm  # noqa: E402
-from drivers.robot import rebot_arm  # noqa: E402
+from drivers.robot.grasp_driver import GRIPPER_MAX_DISTANCE_M, GraspDriver, selected_arm_config  # noqa: E402
+from reBotArm_control_py.actuator import RebotArm  # noqa: E402
+from reBotArm_control_py.controllers import RebotArmEndPose  # noqa: E402
 import utils.graspnet_utils as graspnet_utils  # noqa: E402
-from utils.camera_utils import configure_camera, load_config, load_hand_eye  # noqa: E402
+from utils.camera_utils import compose_cam_to_base_transform, configure_camera, load_config, load_hand_eye  # noqa: E402
 from utils.transforms import (  # noqa: E402
     canonicalize_parallel_gripper_tcp_rotation,
     graspnet_rotation_to_rebot_tcp_rotation,
@@ -68,23 +70,68 @@ from utils.yolo_utils import (  # noqa: E402
     load_yolo as load_yolo_from_config,
 )
 from graspnetAPI import Grasp, GraspGroup  # noqa: E402
+from reBotArm_control_py.kinematics import (  # noqa: E402
+    get_end_effector_frame_id,
+    load_robot_model,
+    pad_q_for_model,
+    pos_rot_to_se3,
+    solve_ik,
+)
+from reBotArm_control_py.kinematics.inverse_kinematics import IKParams  # noqa: E402
 
 
-def _move_ready(robot: RebotArm, ready_cfg: dict[str, Any]) -> None:
+def _wait_motion(controller: RebotArmEndPose, duration: float, extra: float = 0.6) -> None:
+    thread = getattr(controller, "_send_thread", None)
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=duration + extra + 2.0)
+    else:
+        time.sleep(duration + extra)
+
+
+def _move_ready(controller: RebotArmEndPose, ready_cfg: dict[str, Any]) -> None:
     duration = float(ready_cfg.get("duration", 3.0))
-    robot.move_to(
-        float(ready_cfg.get("x", 0.25)),
-        float(ready_cfg.get("y", 0.0)),
-        float(ready_cfg.get("z", 0.35)),
-        float(ready_cfg.get("roll", 0.0)),
-        float(ready_cfg.get("pitch", 1.2)),
-        float(ready_cfg.get("yaw", 0.0)),
+    controller.move_to_traj(
+        x=float(ready_cfg.get("x", 0.25)),
+        y=float(ready_cfg.get("y", 0.0)),
+        z=float(ready_cfg.get("z", 0.35)),
+        roll=float(ready_cfg.get("roll", 0.0)),
+        pitch=float(ready_cfg.get("pitch", 1.2)),
+        yaw=float(ready_cfg.get("yaw", 0.0)),
         duration=duration,
     )
-    robot.wait_motion(duration)
+    _wait_motion(controller, duration)
+
+
+class IkChecker:
+    def __init__(self, arm: RebotArm) -> None:
+        self._arm = arm
+        self._arm_group = arm.groups.get("arm")
+        if self._arm_group is None:
+            raise ValueError("硬件配置缺少 groups.arm")
+        self._n = self._arm_group.num_joints
+        self._model = load_robot_model()
+        self._data = self._model.createData()
+        self._end_frame_id = get_end_effector_frame_id(self._model)
+        self._params = IKParams(max_iter=200, tolerance=1e-4, step_size=0.5, damping=1e-6)
+
+    def check(self, x: float, y: float, z: float, roll: float, pitch: float, yaw: float) -> tuple[bool, float]:
+        q_now = self._arm.get_state(request_feedback=False)[0][: self._n]
+        q_init = pad_q_for_model(self._model, q_now, self._n)
+        target = pos_rot_to_se3(np.array([x, y, z], dtype=np.float64), roll=roll, pitch=pitch, yaw=yaw)
+        result = solve_ik(
+            self._model,
+            self._data,
+            self._end_frame_id,
+            target,
+            q_init,
+            self._params,
+            controlled_joints=self._n,
+        )
+        return bool(result.success), float(result.error)
 
 def _execute_grasp(
-    robot: RebotArm,
+    controller: RebotArmEndPose,
+    grasp_driver: GraspDriver,
     grasp6d: tuple[float, ...],
     pre6d: tuple[float, ...],
     retreat6d: tuple[float, ...],
@@ -104,30 +151,30 @@ def _execute_grasp(
         return False
 
     print("[Grasp] 打开夹爪...")
-    robot.open_gripper()
+    grasp_driver.open_gripper()
 
     print("[Grasp] 移动到预夹取位...")
-    if not robot.move_to(xp, yp, zp, rxp, ryp, rzp, duration=2.0):
+    if not controller.move_to_traj(xp, yp, zp, rxp, ryp, rzp, duration=2.0):
         print("[Grasp] 预夹取 IK 失败，中止")
         return False
-    robot.wait_motion(2.0)
+    _wait_motion(controller, 2.0)
 
     print("[Grasp] 移动到夹取位...")
-    if not robot.move_to(xg, yg, zg, rxg, ryg, rzg, duration=1.5):
+    if not controller.move_to_traj(xg, yg, zg, rxg, ryg, rzg, duration=1.5):
         print("[Grasp] 夹取 IK 失败，中止")
         return False
-    robot.wait_motion(1.5)
+    _wait_motion(controller, 1.5)
 
     print("[Grasp] 夹取中...")
-    ok = robot.grasp()
+    ok = grasp_driver.grasp()
     print("[Grasp] 夹取成功，力控保持中" if ok else "[Grasp] 空夹取")
 
     print("[Grasp] 退回预夹取位...")
-    if robot.move_to(xr, yr, zr, rxr, ryr, rzr, duration=1.5):
-        robot.wait_motion(1.5)
+    if controller.move_to_traj(xr, yr, zr, rxr, ryr, rzr, duration=1.5):
+        _wait_motion(controller, 1.5)
 
     print("[Grasp] 返回预备位...")
-    _move_ready(robot, ready_cfg)
+    _move_ready(controller, ready_cfg)
     return ok
 
 
@@ -155,7 +202,7 @@ def _pose_z_ok(pose6d: tuple[float, ...], min_z: float) -> bool:
 
 
 def _select_executable_grasp(
-    robot: RebotArm,
+    ik_checker: IkChecker,
     grasps: GraspGroup,
     T_cam2base: np.ndarray,
     pregrasp_offset_m: float,
@@ -181,8 +228,8 @@ def _select_executable_grasp(
             skipped_low += 1
             continue
 
-        pre_ok, pre_err = robot.check_ik(*pre6d)
-        grasp_ok, grasp_err = robot.check_ik(*grasp6d) if pre_ok else (False, pre_err)
+        pre_ok, pre_err = ik_checker.check(*pre6d)
+        grasp_ok, grasp_err = ik_checker.check(*grasp6d) if pre_ok else (False, pre_err)
         worst_err = max(worst_err, pre_err, grasp_err)
         if pre_ok and grasp_ok:
             print(f"[G] 选择可执行候选 rank={idx + 1}/{len(ranked)} score={grasp.score:.4f}")
@@ -255,45 +302,13 @@ def main() -> int:
         else graspnet_cfg.get("target_expand_ratio", 1.0)
     )
 
-    print("=== 初始化机械臂 ===")
-    robot = RebotArm(
-        config_path=robot_cfg.get("config_path"),
-        urdf_path=robot_cfg.get("urdf_path"),
-        repo_root=robot_cfg.get("repo_root"),
-    )
-    robot.connect(enable=True)
-    robot.init_gripper()
-
-    print("[Robot] 移动到预备位置...")
-    _move_ready(robot, ready_cfg)
-
-    cam_type = str(cfg.get("camera", {}).get("type", "")).lower()
-    T_hand_eye, hand_eye_mode = load_hand_eye(PROJECT_ROOT, cam_type)
-    if T_hand_eye is None or hand_eye_mode != "eye_in_hand":
-        print("[WARN] 手眼标定不可用或非 eye_in_hand，夹取执行将被禁用")
-        T_hand_eye = None
-
-    print("=== 加载模型 ===")
-    yolo_model, yolo_opts = load_yolo_from_config(
-        cfg,
-        project_root=PROJECT_ROOT,
-        no_yolo=args.no_yolo,
-        model_override=args.yolo_model,
-        device_override=args.yolo_device,
-        conf_override=args.yolo_conf,
-        iou_override=args.yolo_iou,
-        infer_every_override=args.infer_every_live,
-        extra_classes=args.extra_yolo_class,
-    )
-    net = graspnet_utils.build_net(args.checkpoint, args.num_view)
-
     cam_cfg = cfg["camera"]
     print(f"=== 初始化相机: {cam_cfg['type']} {cam_cfg.get('color_width')}x{cam_cfg.get('color_height')}@{cam_cfg.get('fps')} ===")
     cam = make_camera(cfg)
 
     last_detections: list[YoloDetection] = []
     selected_target: Optional[Any] = None
-    last_target_status = "YOLO disabled: full-scene GraspNet" if yolo_model is None else "target detector warming up..."
+    last_target_status = "target detector warming up..."
     status = "warming up camera..."
     frozen = False
     last_display: Optional[np.ndarray] = None
@@ -309,12 +324,58 @@ def main() -> int:
     cv2.resizeWindow(window_name, int(cam_cfg.get("color_width", 1280)), int(cam_cfg.get("color_height", 720)))
     print("\n[Keys] G/SPACE=GraspNet夹取  R=恢复  Q/ESC=退出\n")
 
+    rebotarm: Optional[RebotArm] = None
+    controller: Optional[RebotArmEndPose] = None
+    grasp_driver: Optional[GraspDriver] = None
+    ik_checker: Optional[IkChecker] = None
+    T_hand_eye: Optional[np.ndarray] = None
+    robot_ready = False
+
     try:
         cam.open()
         cam.warm_up(args.warmup)
         K = cam.K.astype(np.float64)
         print("Camera intrinsics:")
         print(K)
+
+        cam_type = str(cam_cfg.get("type", "")).lower()
+        T_hand_eye, hand_eye_mode = load_hand_eye(PROJECT_ROOT, cam_type)
+        if T_hand_eye is None or hand_eye_mode != "eye_in_hand":
+            print("[WARN] 手眼标定不可用或非 eye_in_hand，夹取执行将被禁用")
+            T_hand_eye = None
+
+        print("=== 加载模型 ===")
+        yolo_model, yolo_opts = load_yolo_from_config(
+            cfg,
+            project_root=PROJECT_ROOT,
+            no_yolo=args.no_yolo,
+            model_override=args.yolo_model,
+            device_override=args.yolo_device,
+            conf_override=args.yolo_conf,
+            iou_override=args.yolo_iou,
+            infer_every_override=args.infer_every_live,
+            extra_classes=args.extra_yolo_class,
+        )
+        last_target_status = "YOLO disabled: full-scene GraspNet" if yolo_model is None else "target detector warming up..."
+        net = graspnet_utils.build_net(args.checkpoint, args.num_view)
+
+        print("=== 初始化机械臂 ===")
+        selected = selected_arm_config(robot_cfg.get("repo_root"))
+        rebotarm = RebotArm()
+        controller = RebotArmEndPose(rebotarm, arm_control_mode=selected.controller_mode)
+        grasp_driver = GraspDriver(
+            rebotarm,
+            controller,
+            gripper_config=robot_cfg.get("gripper"),
+            repo_root=robot_cfg.get("repo_root"),
+        )
+        grasp_driver.start()
+        robot_ready = True
+        ik_checker = IkChecker(rebotarm)
+        print(f"[Robot] 控制模式: {selected.controller_mode}")
+
+        print("[Robot] 移动到预备位置...")
+        _move_ready(controller, ready_cfg)
 
         while True:
             color_bgr, depth_mm = cam.get_frame()
@@ -391,7 +452,7 @@ def main() -> int:
                             else graspnet_cfg.get("target_margin_px", 12)
                         ),
                         target_expand_ratio=target_expand_ratio,
-                        max_grasp_width_m=rebot_arm._G_MAX_DIST_M,
+                        max_grasp_width_m=GRIPPER_MAX_DISTANCE_M,
                     )
                 except Exception as exc:
                     status = f"inference failed: {exc}"
@@ -439,9 +500,9 @@ def main() -> int:
                     print("[G] 手眼标定不可用，无法执行夹取")
                     continue
 
-                T_cam2base = robot.get_tcp_pose() @ T_hand_eye
+                T_cam2base = compose_cam_to_base_transform(grasp_driver.get_tcp_pose(), T_hand_eye, cfg)
                 selected = _select_executable_grasp(
-                    robot,
+                    ik_checker,
                     result.grasps,
                     T_cam2base,
                     pregrasp_offset_m,
@@ -459,7 +520,8 @@ def main() -> int:
                 last_display = snap_display
 
                 _execute_grasp(
-                    robot,
+                    controller,
+                    grasp_driver,
                     grasp6d,
                     pre6d,
                     retreat6d,
@@ -474,11 +536,17 @@ def main() -> int:
     finally:
         print("\n[退出] 释放夹爪并回零...")
         try:
-            robot.release_gripper()
-            robot.safe_home()
+            if robot_ready and grasp_driver is not None and controller is not None and getattr(controller, "_running", False):
+                grasp_driver.release_gripper()
         except Exception as exc:
             print(f"[退出] {exc}")
-        robot.disconnect()
+        try:
+            if controller is not None and getattr(controller, "_running", False):
+                controller.end()
+            elif rebotarm is not None:
+                rebotarm.disconnect()
+        except Exception as exc:
+            print(f"[退出] {exc}")
         try:
             cam.close()
         except Exception:

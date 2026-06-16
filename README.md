@@ -1,4 +1,4 @@
-# 🦾 reBot Arm B601-DM Visual Grasping Demo
+# 🦾 reBot Arm B601 Visual Grasping Demo
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Seeed-Projects/reBot-DevArm/main/media/v1.0.png" alt="reBot Arm B601">
@@ -10,7 +10,7 @@
     </a>
     <img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python Version">
     <img src="https://img.shields.io/badge/Platform-Ubuntu%2022.04+-orange.svg" alt="Platform">
-    <img src="https://img.shields.io/badge/Camera-Orbbec%20Gemini%202-green.svg" alt="Camera">
+    <img src="https://img.shields.io/badge/Camera-RGB--D-green.svg" alt="Camera">
     <img src="https://img.shields.io/badge/Detection-YOLO-yellow.svg" alt="YOLO">
 </p>
 
@@ -29,11 +29,11 @@
 
 ## 📖 Introduction
 
-**reBot Arm B601-DM Visual Grasping Demo** is a vision-based grasping demo that integrates the [reBot Arm B601](https://github.com/vectorBH6/reBotArm_control_py) robotic arm control library with the **Orbbec Gemini 2** depth camera. The system uses a YOLO model to detect tabletop objects in real time, estimates grasp poses via OBB minimum bounding rectangles, transforms grasp points from camera space to robot base space through hand-eye calibration, and drives the arm to perform autonomous grasping.
+**reBot Arm B601 Visual Grasping Demo** is a vision-based grasping demo built on the [reBot Arm B601](https://github.com/vectorBH6/reBotArm_control_py) robotic arm control library and RGB-D depth cameras. The system supports both DM and RS configurations of the B601 arm, uses a YOLO model to detect tabletop objects in real time, estimates grasp poses via OBB minimum bounding rectangles, transforms grasp points from camera space to robot base space through hand-eye calibration, and drives the arm to perform autonomous grasping.
 
 ### ✨ Core Features
 
-- 📷 **Depth Perception** — Orbbec Gemini 2 provides aligned RGB + depth frames (1280×720 @ 30fps)
+- 📷 **Depth Perception** — Supports RGB-D depth cameras such as Orbbec Gemini 2 and RealSense D435i / D405
 - 🔍 **Object Detection** — YOLO model-based recognition with open-vocabulary custom classes
 - 📐 **Pose Estimation** — OBB short-axis direction for gripper orientation; depth quantile for grasp height
 - 🔄 **Coordinate Transform** — TSAI hand-eye calibration (Eye-in-Hand) to map camera-frame grasp points to robot base frame
@@ -45,19 +45,19 @@
 
 | Component | Model / Requirement |
 |-----------|-------------------|
-| Robotic Arm | reBot Arm B601-DM (DAMIAO motor variant) |
-| Depth Camera | Orbbec Gemini 2 |
+| Robotic Arm | reBot Arm B601 (DM / RS configurations) |
+| Depth Camera | Orbbec Gemini 2, Intel RealSense D435i / D405 |
 | Communication | USB2CAN serial bridge (arm); USB 3.0 (camera) |
 | Host PC | Ubuntu 22.04+, Python 3.10, x86_64 |
 
 **Wiring**
 
-1. Connect the Gemini 2 to the host via USB 3.0
+1. Connect the depth camera to the host via USB 3.0
 2. Connect the USB2CAN adapter to the arm's CAN bus and plug it into the host
 3. Set device permissions:
 
 ```bash
-sudo chmod a+rw /dev/bus/usb/*/*   # Orbbec camera
+sudo chmod a+rw /dev/bus/usb/*/*   # depth camera USB permissions
 sudo chmod 666 /dev/ttyUSB0        # USB2CAN (adjust port as needed)
 ```
 
@@ -93,17 +93,33 @@ Do not install pip `pin>=3.9.0`: the pip `pin` package may require `numpy>=2.2,<
 ### Step 3. Install the robotic arm control library
 
 ```bash
-git clone https://github.com/vectorBH6/reBotArm_control_py.git sdk/reBotArm_control_py
-cd sdk/reBotArm_control_py
+git clone https://github.com/vectorBH6/reBotArm_control_py.git ../reBotArm_control_py
+cd ../reBotArm_control_py
 pip install -e .
-cd ../..
+cd ../rebot_grasp
 ```
+
+The DM and RS configurations of the B601 arm are selected through the SDK configuration. Edit `hardware_yaml` in `reBotArm_control_py/config/rebotarm.yaml` and choose the matching hardware file, for example:
+
+```yaml
+hardware_yaml: rebotarm_dm.yaml
+```
+
+or:
+
+```yaml
+hardware_yaml: rebotarm_rs.yaml
+```
+
+The visual grasping programs read this SDK configuration and automatically select the matching arm control mode and gripper parameters.
 
 ### Step 4. Install the depth camera SDK
 
-**This project uses the Orbbec Gemini2 depth camera. If you use a different depth camera, install the matching SDK for your camera and skip this step.**
+This project supports RGB-D depth cameras such as Orbbec Gemini 2 and RealSense D435i / D405. Install the SDK that matches your camera; if your environment can already import the camera driver, you can skip this step.
 
-The Orbbec Gemini2 depth camera depends on **pyorbbecsdk** — the Python wrapper for Orbbec SDK v2. Prefer installing the prebuilt Python package first:
+**Orbbec Gemini 2**
+
+Orbbec Gemini 2 depends on **pyorbbecsdk** — the Python wrapper for Orbbec SDK v2. Prefer installing the prebuilt Python package first:
 
 **Option 1: Install from pip (recommended)**
 
@@ -139,7 +155,18 @@ If all installation methods above fail, please refer to the official Orbbec docu
 python -c "import pyorbbecsdk; print('pyorbbecsdk OK')"
 ```
 
-**Configure udev rules (required on first use)**
+**RealSense D435i / D405**
+
+RealSense cameras depend on `pyrealsense2`. Usually you can install it directly with pip:
+
+```bash
+pip install pyrealsense2
+python -c "import pyrealsense2; print('pyrealsense2 OK')"
+```
+
+If your system needs the full RealSense toolchain or udev rules, install `librealsense2` by following the official RealSense SDK documentation.
+
+**Orbbec udev rules (required on first use)**
 
 ```bash
 cd sdk/pyorbbecsdk
@@ -165,6 +192,7 @@ Download the prebuilt package and run `OrbbecViewer` to confirm the camera conne
 | pyorbbecsdk | https://github.com/orbbec/pyorbbecsdk |
 | pyorbbecsdk docs | https://orbbec.github.io/pyorbbecsdk/index.html |
 | ROS2 Wrapper | https://github.com/orbbec/OrbbecSDK_ROS2/tree/v2-main |
+| Intel RealSense SDK | https://github.com/realsenseai/librealsense |
 
 ### Step 5. Configure GraspNet (optional)
 
@@ -219,7 +247,7 @@ cd ../../..
 
 ***If building fails with `fatal error: cusparse.h: No such file or directory`, run `find $CONDA_PREFIX -name cusparse.h` and make sure the directory that contains `cusparse.h` is included in `CPATH` / `CPLUS_INCLUDE_PATH`. If you installed CUDA headers from conda `cuda-toolkit`, the include path is usually `$CONDA_PREFIX/targets/x86_64-linux/include` instead of the pip `nvidia/cu13/include` path shown above.***
 
-***In addition, older GraspNet API dependencies may still use the deprecated `sklearn` package name. The `sed` command replaces it with the currently recommended `scikit-learn` package name to avoid `The 'sklearn' PyPI package is deprecated` during installation. Keep GraspNet API's `numpy==1.23.4` pin unless you also upgrade its old dependencies, because `transforms3d==0.3.1` still uses deprecated NumPy aliases such as `np.float`.***
+***In addition, GraspNet API dependencies may still use the `sklearn` package name. The `sed` command replaces it with `scikit-learn` to avoid the package-name warning during installation. Keep GraspNet API's `numpy==1.23.4` pin unless you update that dependency stack, because `transforms3d==0.3.1` still uses NumPy aliases such as `np.float`.***
 
 Refer to the official graspnet-baseline repository to download the official GraspNet pretrained weight, then place `checkpoint-rs.tar` at:
 
@@ -245,7 +273,7 @@ rebot_grasp/
 ├── config/
 │   ├── default.yaml              # Main configuration
 │   └── calibration/
-│       └── orbbec_gemini2/
+│       └── <camera_type>/
 │           ├── intrinsics.npz    # Camera intrinsics
 │           └── hand_eye.npz      # Hand-eye calibration result
 ├── drivers/
@@ -254,7 +282,7 @@ rebot_grasp/
 │   │   ├── orbbec_gemini2.py     # Gemini 2 driver
 │   │   └── realsense.py          # RealSense driver (alternative)
 │   └── robot/
-│       └── rebot_arm.py          # reBotArm wrapper + gripper FSM
+│       └── grasp_driver.py       # Thin grasp helper around the arm SDK
 ├── calibration/
 │   ├── aruco_pose.py             # ArUco pose estimation
 │   └── hand_eye.py               # Hand-eye calibration solver
@@ -296,16 +324,35 @@ calibration:
     dict_id: 0
     target_marker_id: 0
   hand_eye_method: TSAI
+  hand_eye_compensation_m:
+    x: 0.0
+    y: 0.0
+    z: 0.0
 
 detection:
   conf_threshold: 0.5
   iou_threshold: 0.45
 
 robot:
-  repo_root: null   # auto-detects sdk/reBotArm_control_py
-  config_path: null
-  urdf_path: null
-  pose_convention: xyz_euler_rad
+  repo_root: null
+  control:
+    dm:
+      arm_control_mode: posvel
+    rs:
+      arm_control_mode: mit
+  gripper:
+    dm:
+      angle_open: 5.0
+      counterclockwise: true
+      tau_max: 1.5
+      close_torque: 1.0
+      default_force: 0.30
+    rs:
+      angle_open: 5.0
+      counterclockwise: false
+      tau_max: 1.5
+      close_torque: 1.0
+      default_force: 0.10
   ready_pose:
     x: 0.3
     y: 0.0
@@ -339,11 +386,14 @@ grasp_pipeline:
 - `camera.type`: camera type. Available values: `realsense_d435i`, `realsense_d405`, `orbbec_gemini2`.
 - `camera.serial`: specific device serial number; `null` means use the first available device.
 - `calibration.aruco.marker_length_m`: ArUco marker side length used for hand-eye calibration, in meters.
+- `calibration.hand_eye_compensation_m`: manual XYZ translation compensation applied after hand-eye calibration, in the robot base frame and in meters. When all values are `0.0`, the compensation matrix is the identity matrix.
 - `detection.conf_threshold`: YOLO confidence threshold.
 - `detection.iou_threshold`: YOLO NMS IoU threshold.
-- `robot.repo_root`: root directory of `reBotArm_control_py`; when `null`, the code auto-detects `rebot_grasp/sdk/reBotArm_control_py`.
-- `robot.config_path` / `robot.urdf_path`: robot control config and URDF; `null` means use the SDK defaults.
+- `robot.repo_root`: root directory of `reBotArm_control_py`; when `null`, the code auto-detects the repository next to this project.
+- `robot.control.dm` / `robot.control.rs`: control-mode overrides selected according to the current SDK hardware configuration. By default, DM uses `posvel` and RS uses `mit`.
+- `robot.gripper.dm` / `robot.gripper.rs`: gripper parameters selected according to the current SDK hardware configuration. `angle_open`, `close_torque`, and `default_force` are positive magnitudes. `counterclockwise` marks the motor direction used for closing; the code derives the signed open angle and closing torque from it. `tau_max` is the torque ceiling. Other gripper behavior parameters are defined in `drivers/robot/grasp_driver.py`.
 - `robot.ready_pose`: the ready pose reached on startup and after each completed grasp.
+- To switch between the DM and RS arm, edit `hardware_yaml` in the SDK file `reBotArm_control_py/config/rebotarm.yaml` and choose `rebotarm_dm.yaml` or `rebotarm_rs.yaml`.
 - `grasp_pipeline.infer_every_live`: run detection once every N frames during live preview to reduce CPU/GPU load.
 - `grasp_pipeline.grasp.depth_quantile`: depth quantile used by the ordinary grasp pipeline; larger values usually place the grasp point deeper.
 - `grasp_pipeline.grasp.pregrasp_offset_m`: distance, in meters, to retreat along the tool approach direction when generating the pre-grasp pose.
@@ -433,7 +483,7 @@ This usually means the robotic arm SDK dependencies are not installed in the cur
 ```bash
 conda activate rebotarm
 conda env update -n rebotarm -f environment.yml
-cd sdk/reBotArm_control_py && pip install -e .
+cd ../reBotArm_control_py && pip install -e .
 ```
 
 ### 2. Pressing `G` does not execute grasping
@@ -512,6 +562,7 @@ If the output is `False`, fix the CUDA / PyTorch installation first. If it is `T
 - [Orbbec Gemini 2](https://www.orbbec.com/products/stereo-vision-camera/gemini-2/)
 - [Orbbec SDK v2](https://github.com/orbbec/OrbbecSDK_v2)
 - [pyorbbecsdk](https://github.com/orbbec/pyorbbecsdk)
+- [RealSense SDK](https://github.com/realsenseai/librealsense)
 - [graspnet/graspnet-baseline](https://github.com/graspnet/graspnet-baseline)
 - [Ultralytics YOLOv11](https://github.com/ultralytics/ultralytics)
 
