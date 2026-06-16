@@ -391,7 +391,7 @@ def main():
                 gripper_config=robot_cfg.get("gripper"),
                 repo_root=robot_cfg.get("repo_root"),
             )
-            controller.start()
+            grasp_driver.start()
             print(
                 f"[Robot] Auto mode ready, control mode: {selected.controller_mode}. "
                 f"{len(CALIB_POSES_XYZ)} preset poses will be traversed."

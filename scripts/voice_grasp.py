@@ -434,7 +434,7 @@ def main() -> int:
         gripper_config=robot_cfg.get("gripper"),
         repo_root=robot_cfg.get("repo_root"),
     )
-    controller.start()
+    grasp_driver.start()
     print(f"[Robot] 控制模式: {selected.controller_mode}")
 
     print("[Robot] 移动到预备位置...")

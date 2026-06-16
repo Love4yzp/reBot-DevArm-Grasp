@@ -12,7 +12,7 @@ calibration:
     target_marker_id: 0
   hand_eye_method: TSAI
   hand_eye_compensation_m:
-    x: 0.01
+    x: 0.00
     y: 0.0
     z: -0.01
 
@@ -29,15 +29,17 @@ robot:
       arm_control_mode: mit
   gripper:
     dm:
-      angle_open: -5.0
+      angle_open: 5.0
+      counterclockwise: true
       tau_max: 1.5
       close_torque: 1.0
       default_force: 0.30
     rs:
       angle_open: 5.0
-      tau_max: 0.5
-      close_torque: -0.3
-      default_force: -0.20
+      counterclockwise: false
+      tau_max: 1.5
+      close_torque: 1.5
+      default_force: 0.30
   ready_pose:
     x: 0.3
     y: 0.0
@@ -56,7 +58,6 @@ yolo:
     - "light blue coffee cup"
     - "cup"
     - "green object"
-    - "red object"
     - "tool"
 
 grasp_pipeline:

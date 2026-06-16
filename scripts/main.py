@@ -2,11 +2,12 @@
 main.py — 基于短轴估计的机械臂夹取主程序
 =========================================
 流程：
-  1. 机械臂 + 夹爪使能，移动到预备高位
-  2. 实时相机预览 + YOLO 检测 + 短轴夹取姿态估计
-  3. G 键：冻结当前帧并执行夹取（--dry-run 只打印坐标）
-  4. R 键：恢复实时预览
-  5. Q 键：退出，释放夹爪并回零位
+  1. 初始化 RGB-D 相机，确认图像流可用
+  2. 机械臂 + 夹爪使能，移动到预备高位
+  3. 实时相机预览 + YOLO 检测 + 短轴夹取姿态估计
+  4. G 键：冻结当前帧并执行夹取（--dry-run 只打印坐标）
+  5. R 键：恢复实时预览
+  6. Q 键：退出，释放夹爪并回零位
 """
 
 from __future__ import annotations
@@ -163,46 +164,9 @@ def main() -> int:
         "ready_pose",
         {"x": 0.25, "y": 0.0, "z": 0.35, "roll": 0.0, "pitch": 1.2, "yaw": 0.0, "duration": 3.0},
     )
-
-    print("=== 初始化机械臂 ===")
-    selected = selected_arm_config(robot_cfg.get("repo_root"))
-    rebotarm = RebotArm()
-    controller = RebotArmEndPose(rebotarm, arm_control_mode=selected.controller_mode)
-    grasp_driver = GraspDriver(
-        rebotarm,
-        controller,
-        gripper_config=robot_cfg.get("gripper"),
-        repo_root=robot_cfg.get("repo_root"),
-    )
-    controller.start()
-    print(f"[Robot] 控制模式: {selected.controller_mode}")
-
-    print("[Robot] 移动到预备位置...")
-    _move_ready(controller, ready_cfg)
-
-    cam_type = str(cfg.get("camera", {}).get("type", "")).lower()
-    T_hand_eye, hand_eye_mode = load_hand_eye(PROJECT_ROOT, cam_type)
-    if T_hand_eye is None or hand_eye_mode != "eye_in_hand":
-        print("[WARN] 手眼标定不可用或非 eye_in_hand，夹取执行将被禁用")
-        T_hand_eye = None
-
-    print(f"=== 相机: {cfg.get('camera', {}).get('type')} ===")
+    cam_cfg = cfg.get("camera", {})
+    print(f"=== 相机: {cam_cfg.get('type')} ===")
     cam = make_camera(cfg)
-    cam.open()
-    cam.warm_up(15)
-    K = cam.K.astype(np.float32)
-
-    yolo_cfg = cfg.get("yolo", {})
-    gp_cfg = cfg.get("grasp_pipeline", {})
-    grasp_cfg = gp_cfg.get("grasp", {})
-
-    model_name = yolo_cfg.get("model_name", "yoloe-26s-seg.pt")
-    pregrasp_offset_m = float(grasp_cfg.get("pregrasp_offset_m", 0.08))
-    depth_quantile = float(grasp_cfg.get("depth_quantile", 0.75))
-    infer_every = max(1, int(gp_cfg.get("infer_every_live", 2)))
-
-    print(f"=== 加载 YOLO: {model_name} ===")
-    model, yolo_opts = load_yolo(cfg, project_root=PROJECT_ROOT)
 
     last_results: list[Any] = []
     last_grasps: list[GraspPose] = []
@@ -217,7 +181,53 @@ def main() -> int:
     cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
     print("\n[Keys]  G=夹取  R=恢复  Q/ESC=退出\n")
 
+    controller: Optional[RebotArmEndPose] = None
+    rebotarm: Optional[RebotArm] = None
+    grasp_driver: Optional[GraspDriver] = None
+    T_hand_eye: Optional[np.ndarray] = None
+    yolo_opts: dict[str, Any] = {}
+    robot_ready = False
+
     try:
+        cam.open()
+        cam.warm_up(15)
+        K = cam.K.astype(np.float32)
+
+        cam_type = str(cam_cfg.get("type", "")).lower()
+        T_hand_eye, hand_eye_mode = load_hand_eye(PROJECT_ROOT, cam_type)
+        if T_hand_eye is None or hand_eye_mode != "eye_in_hand":
+            print("[WARN] 手眼标定不可用或非 eye_in_hand，夹取执行将被禁用")
+            T_hand_eye = None
+
+        yolo_cfg = cfg.get("yolo", {})
+        gp_cfg = cfg.get("grasp_pipeline", {})
+        grasp_cfg = gp_cfg.get("grasp", {})
+
+        model_name = yolo_cfg.get("model_name", "yoloe-26s-seg.pt")
+        pregrasp_offset_m = float(grasp_cfg.get("pregrasp_offset_m", 0.08))
+        depth_quantile = float(grasp_cfg.get("depth_quantile", 0.75))
+        infer_every = max(1, int(gp_cfg.get("infer_every_live", 2)))
+
+        print(f"=== 加载 YOLO: {model_name} ===")
+        model, yolo_opts = load_yolo(cfg, project_root=PROJECT_ROOT)
+
+        print("=== 初始化机械臂 ===")
+        selected = selected_arm_config(robot_cfg.get("repo_root"))
+        rebotarm = RebotArm()
+        controller = RebotArmEndPose(rebotarm, arm_control_mode=selected.controller_mode)
+        grasp_driver = GraspDriver(
+            rebotarm,
+            controller,
+            gripper_config=robot_cfg.get("gripper"),
+            repo_root=robot_cfg.get("repo_root"),
+        )
+        grasp_driver.start()
+        robot_ready = True
+        print(f"[Robot] 控制模式: {selected.controller_mode}")
+
+        print("[Robot] 移动到预备位置...")
+        _move_ready(controller, ready_cfg)
+
         while True:
             color_bgr, depth_mm = cam.get_frame()
             if color_bgr is None or depth_mm is None:
@@ -304,14 +314,21 @@ def main() -> int:
     finally:
         print("\n[退出] 释放夹爪并回零...")
         try:
-            grasp_driver.release_gripper()
+            if robot_ready and grasp_driver is not None and controller is not None and getattr(controller, "_running", False):
+                grasp_driver.release_gripper()
         except Exception as exc:
             print(f"[退出] {exc}")
         try:
-            controller.end()
+            if controller is not None and getattr(controller, "_running", False):
+                controller.end()
+            elif rebotarm is not None:
+                rebotarm.disconnect()
         except Exception as exc:
             print(f"[退出] {exc}")
-        cam.close()
+        try:
+            cam.close()
+        except Exception:
+            pass
         cv2.destroyAllWindows()
         print("已退出。")
 

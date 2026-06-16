@@ -2,11 +2,12 @@
 grasp.py - 基于 GraspNet 的机械臂视觉夹取主程序
 ================================================
 流程：
-  1. 初始化机械臂、夹爪和 RGB-D 相机，移动到预备位
-  2. YOLO 选择目标，GraspNet 在当前 RGB-D 帧上估计 6D 夹取姿态
-  3. G/SPACE 键：冻结当前帧并执行夹取（--dry-run 只打印坐标）
-  4. R 键：恢复实时预览
-  5. Q/ESC 键：退出，释放夹爪并回零位
+  1. 初始化 RGB-D 相机，确认图像流可用
+  2. 机械臂 + 夹爪使能，移动到预备位
+  3. YOLO 选择目标，GraspNet 在当前 RGB-D 帧上估计 6D 夹取姿态
+  4. G/SPACE 键：冻结当前帧并执行夹取（--dry-run 只打印坐标）
+  5. R 键：恢复实时预览
+  6. Q/ESC 键：退出，释放夹爪并回零位
 
 用法：
   conda activate seeed
@@ -114,7 +115,7 @@ class IkChecker:
         self._params = IKParams(max_iter=200, tolerance=1e-4, step_size=0.5, damping=1e-6)
 
     def check(self, x: float, y: float, z: float, roll: float, pitch: float, yaw: float) -> tuple[bool, float]:
-        q_now = self._arm.get_state()[0][: self._n]
+        q_now = self._arm.get_state(request_feedback=False)[0][: self._n]
         q_init = pad_q_for_model(self._model, q_now, self._n)
         target = pos_rot_to_se3(np.array([x, y, z], dtype=np.float64), roll=roll, pitch=pitch, yaw=yaw)
         result = solve_ik(
@@ -301,50 +302,13 @@ def main() -> int:
         else graspnet_cfg.get("target_expand_ratio", 1.0)
     )
 
-    print("=== 初始化机械臂 ===")
-    selected = selected_arm_config(robot_cfg.get("repo_root"))
-    rebotarm = RebotArm()
-    controller = RebotArmEndPose(rebotarm, arm_control_mode=selected.controller_mode)
-    grasp_driver = GraspDriver(
-        rebotarm,
-        controller,
-        gripper_config=robot_cfg.get("gripper"),
-        repo_root=robot_cfg.get("repo_root"),
-    )
-    controller.start()
-    ik_checker = IkChecker(rebotarm)
-    print(f"[Robot] 控制模式: {selected.controller_mode}")
-
-    print("[Robot] 移动到预备位置...")
-    _move_ready(controller, ready_cfg)
-
-    cam_type = str(cfg.get("camera", {}).get("type", "")).lower()
-    T_hand_eye, hand_eye_mode = load_hand_eye(PROJECT_ROOT, cam_type)
-    if T_hand_eye is None or hand_eye_mode != "eye_in_hand":
-        print("[WARN] 手眼标定不可用或非 eye_in_hand，夹取执行将被禁用")
-        T_hand_eye = None
-
-    print("=== 加载模型 ===")
-    yolo_model, yolo_opts = load_yolo_from_config(
-        cfg,
-        project_root=PROJECT_ROOT,
-        no_yolo=args.no_yolo,
-        model_override=args.yolo_model,
-        device_override=args.yolo_device,
-        conf_override=args.yolo_conf,
-        iou_override=args.yolo_iou,
-        infer_every_override=args.infer_every_live,
-        extra_classes=args.extra_yolo_class,
-    )
-    net = graspnet_utils.build_net(args.checkpoint, args.num_view)
-
     cam_cfg = cfg["camera"]
     print(f"=== 初始化相机: {cam_cfg['type']} {cam_cfg.get('color_width')}x{cam_cfg.get('color_height')}@{cam_cfg.get('fps')} ===")
     cam = make_camera(cfg)
 
     last_detections: list[YoloDetection] = []
     selected_target: Optional[Any] = None
-    last_target_status = "YOLO disabled: full-scene GraspNet" if yolo_model is None else "target detector warming up..."
+    last_target_status = "target detector warming up..."
     status = "warming up camera..."
     frozen = False
     last_display: Optional[np.ndarray] = None
@@ -360,12 +324,58 @@ def main() -> int:
     cv2.resizeWindow(window_name, int(cam_cfg.get("color_width", 1280)), int(cam_cfg.get("color_height", 720)))
     print("\n[Keys] G/SPACE=GraspNet夹取  R=恢复  Q/ESC=退出\n")
 
+    rebotarm: Optional[RebotArm] = None
+    controller: Optional[RebotArmEndPose] = None
+    grasp_driver: Optional[GraspDriver] = None
+    ik_checker: Optional[IkChecker] = None
+    T_hand_eye: Optional[np.ndarray] = None
+    robot_ready = False
+
     try:
         cam.open()
         cam.warm_up(args.warmup)
         K = cam.K.astype(np.float64)
         print("Camera intrinsics:")
         print(K)
+
+        cam_type = str(cam_cfg.get("type", "")).lower()
+        T_hand_eye, hand_eye_mode = load_hand_eye(PROJECT_ROOT, cam_type)
+        if T_hand_eye is None or hand_eye_mode != "eye_in_hand":
+            print("[WARN] 手眼标定不可用或非 eye_in_hand，夹取执行将被禁用")
+            T_hand_eye = None
+
+        print("=== 加载模型 ===")
+        yolo_model, yolo_opts = load_yolo_from_config(
+            cfg,
+            project_root=PROJECT_ROOT,
+            no_yolo=args.no_yolo,
+            model_override=args.yolo_model,
+            device_override=args.yolo_device,
+            conf_override=args.yolo_conf,
+            iou_override=args.yolo_iou,
+            infer_every_override=args.infer_every_live,
+            extra_classes=args.extra_yolo_class,
+        )
+        last_target_status = "YOLO disabled: full-scene GraspNet" if yolo_model is None else "target detector warming up..."
+        net = graspnet_utils.build_net(args.checkpoint, args.num_view)
+
+        print("=== 初始化机械臂 ===")
+        selected = selected_arm_config(robot_cfg.get("repo_root"))
+        rebotarm = RebotArm()
+        controller = RebotArmEndPose(rebotarm, arm_control_mode=selected.controller_mode)
+        grasp_driver = GraspDriver(
+            rebotarm,
+            controller,
+            gripper_config=robot_cfg.get("gripper"),
+            repo_root=robot_cfg.get("repo_root"),
+        )
+        grasp_driver.start()
+        robot_ready = True
+        ik_checker = IkChecker(rebotarm)
+        print(f"[Robot] 控制模式: {selected.controller_mode}")
+
+        print("[Robot] 移动到预备位置...")
+        _move_ready(controller, ready_cfg)
 
         while True:
             color_bgr, depth_mm = cam.get_frame()
@@ -526,11 +536,15 @@ def main() -> int:
     finally:
         print("\n[退出] 释放夹爪并回零...")
         try:
-            grasp_driver.release_gripper()
+            if robot_ready and grasp_driver is not None and controller is not None and getattr(controller, "_running", False):
+                grasp_driver.release_gripper()
         except Exception as exc:
             print(f"[退出] {exc}")
         try:
-            controller.end()
+            if controller is not None and getattr(controller, "_running", False):
+                controller.end()
+            elif rebotarm is not None:
+                rebotarm.disconnect()
         except Exception as exc:
             print(f"[退出] {exc}")
         try:

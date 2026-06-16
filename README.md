@@ -342,15 +342,17 @@ robot:
       arm_control_mode: mit
   gripper:
     dm:
-      angle_open: -5.0
+      angle_open: 5.0
+      counterclockwise: true
       tau_max: 1.5
       close_torque: 1.0
       default_force: 0.30
     rs:
       angle_open: 5.0
+      counterclockwise: false
       tau_max: 1.5
-      close_torque: -1.0
-      default_force: -0.30
+      close_torque: 1.0
+      default_force: 0.10
   ready_pose:
     x: 0.3
     y: 0.0
@@ -389,7 +391,7 @@ grasp_pipeline:
 - `detection.iou_threshold`: YOLO NMS IoU threshold.
 - `robot.repo_root`: root directory of `reBotArm_control_py`; when `null`, the code auto-detects the repository next to this project.
 - `robot.control.dm` / `robot.control.rs`: control-mode overrides selected according to the current SDK hardware configuration. By default, DM uses `posvel` and RS uses `mit`.
-- `robot.gripper.dm` / `robot.gripper.rs`: gripper parameters selected according to the current SDK hardware configuration. The DM and RS grippers open in opposite directions, so `angle_open`, `close_torque`, and `default_force` carry opposite signs; `tau_max` is the torque ceiling. Other gripper behavior parameters are defined in `drivers/robot/grasp_driver.py`.
+- `robot.gripper.dm` / `robot.gripper.rs`: gripper parameters selected according to the current SDK hardware configuration. `angle_open`, `close_torque`, and `default_force` are positive magnitudes. `counterclockwise` marks the motor direction used for closing; the code derives the signed open angle and closing torque from it. `tau_max` is the torque ceiling. Other gripper behavior parameters are defined in `drivers/robot/grasp_driver.py`.
 - `robot.ready_pose`: the ready pose reached on startup and after each completed grasp.
 - To switch between the DM and RS arm, edit `hardware_yaml` in the SDK file `reBotArm_control_py/config/rebotarm.yaml` and choose `rebotarm_dm.yaml` or `rebotarm_rs.yaml`.
 - `grasp_pipeline.infer_every_live`: run detection once every N frames during live preview to reduce CPU/GPU load.
