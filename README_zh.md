@@ -91,13 +91,23 @@ conda activate rebotarm
 ### Step 3. 安装机械臂控制库
 
 ```bash
-git clone https://github.com/vectorBH6/reBotArm_control_py.git ../reBotArm_control_py
-cd ../reBotArm_control_py
+cd sdk/reBotArm_control_py
 pip install -e .
-cd ../rebot_grasp
+cd ../..
 ```
 
-B601 的 DM 与 RS 两种机械臂配置通过 SDK 仓库中的配置文件切换。请在 `reBotArm_control_py/config/rebotarm.yaml` 中修改 `hardware_yaml`，选择对应的硬件配置，例如：
+如果 `pip install -e .` 报 `Multiple top-level packages discovered in a flat-layout`，请在 `reBotArm_control_py` 的 `pyproject.toml` 中加入显式包发现配置，然后重新执行 `pip install -e .`：
+
+```toml
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["reBotArm_control_py*"]
+```
+
+B601 的 DM 与 RS 两种机械臂配置通过 SDK 仓库中的配置文件切换。请在 `sdk/reBotArm_control_py/config/rebotarm.yaml` 中修改 `hardware_yaml`，选择对应的硬件配置，例如：
 
 ```yaml
 hardware_yaml: rebotarm_dm.yaml
@@ -307,12 +317,10 @@ rebot_grasp/
 
 ```yaml
 camera:
-  type: realsense_d435i
+  type: orbbec_gemini2
   serial: null
   color_width: 1280
   color_height: 720
-  depth_width: 1280
-  depth_height: 720
   fps: 30
 
 calibration:
@@ -322,9 +330,9 @@ calibration:
     target_marker_id: 0
   hand_eye_method: TSAI
   hand_eye_compensation_m:
-    x: 0.0
+    x: 0.00
     y: 0.0
-    z: 0.0
+    z: -0.01
 
 detection:
   conf_threshold: 0.5
@@ -348,8 +356,8 @@ robot:
       angle_open: 5.0
       counterclockwise: false
       tau_max: 1.5
-      close_torque: 1.0
-      default_force: 0.10
+      close_torque: 1.5
+      default_force: 0.30
   ready_pose:
     x: 0.3
     y: 0.0
@@ -368,14 +376,26 @@ yolo:
     - "light blue coffee cup"
     - "cup"
     - "green object"
-    - "red object"
     - "tool"
 
 grasp_pipeline:
   infer_every_live: 3
   grasp:
-    depth_quantile: 0.6
+    depth_quantile: 0.5
     pregrasp_offset_m: 0.080
+    insertion_depth_m: 0.015
+    min_base_z_m: 0.00
+
+graspnet:
+  checkpoint: "checkpoint-rs.tar"
+  num_point: 20000
+  collision_thresh: 0.01
+  min_depth: 0.05
+  max_depth: 1.0
+  top_k: 50
+  target_class: null
+  target_margin_px: 12
+  target_expand_ratio: 1.35
 ```
 
 ### YAML参数说明
@@ -386,14 +406,17 @@ grasp_pipeline:
 - `calibration.hand_eye_compensation_m`：手眼标定后的 XYZ 手动平移补偿，作用在机器人基坐标系下，单位为米。三项全为 `0.0` 时，补偿矩阵为单位矩阵。
 - `detection.conf_threshold`：YOLO 检测置信度阈值。
 - `detection.iou_threshold`：YOLO NMS IoU 阈值。
-- `robot.repo_root`：`reBotArm_control_py` 仓库根目录；
+- `robot.repo_root`：`reBotArm_control_py` 仓库根目录；为 `null` 时默认使用 `sdk/reBotArm_control_py`。
 - `robot.control.dm` / `robot.control.rs`：按 SDK 当前硬件配置自动选择的控制模式覆写。默认 DM 使用 `posvel`，RS 使用 `mit`。
 - `robot.gripper.dm` / `robot.gripper.rs`：按 SDK 当前硬件配置自动选择的两组夹爪参数。`angle_open`、`close_torque`、`default_force` 均填写正数数值；`counterclockwise` 表示闭合时采用的电机转动方向，代码会据此推导张开角度和闭合力矩的符号。`tau_max` 为力矩上限。其余夹爪行为参数在 `drivers/robot/grasp_driver.py` 中定义。
 - `robot.ready_pose`：启动后先到达的预备位，抓取结束后也会回到这里。
-- 切换 DM/RS 机械臂：在 SDK 的 `reBotArm_control_py/config/rebotarm.yaml` 中修改 `hardware_yaml`，选择 `rebotarm_dm.yaml` 或 `rebotarm_rs.yaml`。
+- 切换 DM/RS 机械臂：在 SDK 的 `sdk/reBotArm_control_py/config/rebotarm.yaml` 中修改 `hardware_yaml`，选择 `rebotarm_dm.yaml` 或 `rebotarm_rs.yaml`。
 - `grasp_pipeline.infer_every_live`：实时预览时每 N 帧跑一次检测，减轻 CPU/GPU 压力。
 - `grasp_pipeline.grasp.depth_quantile`：短轴抓取管线使用的深度分位数，值越大通常抓取点越深。
 - `grasp_pipeline.grasp.pregrasp_offset_m`：预抓取位相对最终抓取位，沿末端进给方向回退的距离，单位米。
+- `grasp_pipeline.grasp.insertion_depth_m`：GraspNet 执行时沿进给方向额外插入的距离。
+- `grasp_pipeline.grasp.min_base_z_m`：机械臂基坐标系下允许的最低抓取高度。
+- `graspnet`：`scripts/graspnet_camera_demo.py` 和 `scripts/grasp.py` 使用的 GraspNet 运行参数。
 
 ### 模型选择库
 
@@ -434,11 +457,12 @@ python scripts/collect_handeye_eih.py --manual
 
 完整的视觉抓取流水线：
 
-1. 机械臂使能，移动到预备高位
-2. 实时相机预览 + YOLO 目标检测与实例分割
-3. OBB 短轴估计夹爪朝向，深度分位数估计抓取高度
-4. 按 `G` 冻结帧，经手眼变换计算机械臂目标位姿
-5. 机械臂移动到预抓取点 → 下降 → 夹爪闭合 → 提升 → 回预备位
+1. 初始化 RGB-D 相机，确认图像流可用
+2. 机械臂与夹爪使能，移动到预备高位
+3. 实时相机预览 + YOLO 目标检测与实例分割
+4. OBB 短轴估计夹爪朝向，深度分位数估计抓取高度
+5. 按 `G` 冻结帧，经手眼变换计算机械臂目标位姿
+6. 机械臂移动到预抓取点 → 下降 → 夹爪闭合 → 提升 → 回预备位
 
 ### `scripts/ordinary_grasp_pipeline.py` — 简化抓取测试
 
@@ -480,7 +504,7 @@ Eye-in-Hand 模式手眼标定，支持自动遍历采样和手动重力补偿�
 ```bash
 conda activate rebotarm
 conda env update -n rebotarm -f environment.yml
-cd ../reBotArm_control_py && pip install -e .
+cd sdk/reBotArm_control_py && pip install -e .
 ```
 
 ### 2. 按 `G` 后不执行抓取
