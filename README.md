@@ -93,13 +93,23 @@ Do not install pip `pin>=3.9.0`: the pip `pin` package may require `numpy>=2.2,<
 ### Step 3. Install the robotic arm control library
 
 ```bash
-git clone https://github.com/vectorBH6/reBotArm_control_py.git ../reBotArm_control_py
-cd ../reBotArm_control_py
+cd sdk/reBotArm_control_py
 pip install -e .
-cd ../rebot_grasp
+cd ../..
 ```
 
-The DM and RS configurations of the B601 arm are selected through the SDK configuration. Edit `hardware_yaml` in `reBotArm_control_py/config/rebotarm.yaml` and choose the matching hardware file, for example:
+If `pip install -e .` reports `Multiple top-level packages discovered in a flat-layout`, add explicit package discovery to `pyproject.toml` in `reBotArm_control_py`, then run `pip install -e .` again:
+
+```toml
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["reBotArm_control_py*"]
+```
+
+The DM and RS configurations of the B601 arm are selected through the SDK configuration. Edit `hardware_yaml` in `sdk/reBotArm_control_py/config/rebotarm.yaml` and choose the matching hardware file, for example:
 
 ```yaml
 hardware_yaml: rebotarm_dm.yaml
@@ -310,12 +320,10 @@ Edit `config/default.yaml` and verify the key parameters:
 
 ```yaml
 camera:
-  type: realsense_d435i
+  type: orbbec_gemini2
   serial: null
   color_width: 1280
   color_height: 720
-  depth_width: 1280
-  depth_height: 720
   fps: 30
 
 calibration:
@@ -325,9 +333,9 @@ calibration:
     target_marker_id: 0
   hand_eye_method: TSAI
   hand_eye_compensation_m:
-    x: 0.0
+    x: 0.00
     y: 0.0
-    z: 0.0
+    z: -0.01
 
 detection:
   conf_threshold: 0.5
@@ -351,8 +359,8 @@ robot:
       angle_open: 5.0
       counterclockwise: false
       tau_max: 1.5
-      close_torque: 1.0
-      default_force: 0.10
+      close_torque: 1.5
+      default_force: 0.30
   ready_pose:
     x: 0.3
     y: 0.0
@@ -371,14 +379,26 @@ yolo:
     - "light blue coffee cup"
     - "cup"
     - "green object"
-    - "red object"
     - "tool"
 
 grasp_pipeline:
   infer_every_live: 3
   grasp:
-    depth_quantile: 0.6
+    depth_quantile: 0.5
     pregrasp_offset_m: 0.080
+    insertion_depth_m: 0.015
+    min_base_z_m: 0.00
+
+graspnet:
+  checkpoint: "checkpoint-rs.tar"
+  num_point: 20000
+  collision_thresh: 0.01
+  min_depth: 0.05
+  max_depth: 1.0
+  top_k: 50
+  target_class: null
+  target_margin_px: 12
+  target_expand_ratio: 1.35
 ```
 
 ### YAML parameter notes
@@ -389,14 +409,17 @@ grasp_pipeline:
 - `calibration.hand_eye_compensation_m`: manual XYZ translation compensation applied after hand-eye calibration, in the robot base frame and in meters. When all values are `0.0`, the compensation matrix is the identity matrix.
 - `detection.conf_threshold`: YOLO confidence threshold.
 - `detection.iou_threshold`: YOLO NMS IoU threshold.
-- `robot.repo_root`: root directory of `reBotArm_control_py`; when `null`, the code auto-detects the repository next to this project.
+- `robot.repo_root`: root directory of `reBotArm_control_py`; when `null`, the code uses `sdk/reBotArm_control_py`.
 - `robot.control.dm` / `robot.control.rs`: control-mode overrides selected according to the current SDK hardware configuration. By default, DM uses `posvel` and RS uses `mit`.
 - `robot.gripper.dm` / `robot.gripper.rs`: gripper parameters selected according to the current SDK hardware configuration. `angle_open`, `close_torque`, and `default_force` are positive magnitudes. `counterclockwise` marks the motor direction used for closing; the code derives the signed open angle and closing torque from it. `tau_max` is the torque ceiling. Other gripper behavior parameters are defined in `drivers/robot/grasp_driver.py`.
 - `robot.ready_pose`: the ready pose reached on startup and after each completed grasp.
-- To switch between the DM and RS arm, edit `hardware_yaml` in the SDK file `reBotArm_control_py/config/rebotarm.yaml` and choose `rebotarm_dm.yaml` or `rebotarm_rs.yaml`.
+- To switch between the DM and RS arm, edit `hardware_yaml` in the SDK file `sdk/reBotArm_control_py/config/rebotarm.yaml` and choose `rebotarm_dm.yaml` or `rebotarm_rs.yaml`.
 - `grasp_pipeline.infer_every_live`: run detection once every N frames during live preview to reduce CPU/GPU load.
 - `grasp_pipeline.grasp.depth_quantile`: depth quantile used by the ordinary grasp pipeline; larger values usually place the grasp point deeper.
 - `grasp_pipeline.grasp.pregrasp_offset_m`: distance, in meters, to retreat along the tool approach direction when generating the pre-grasp pose.
+- `grasp_pipeline.grasp.insertion_depth_m`: additional insertion distance along the approach direction for GraspNet execution.
+- `grasp_pipeline.grasp.min_base_z_m`: minimum allowed grasp height in the robot base frame.
+- `graspnet`: GraspNet runtime parameters used by `scripts/graspnet_camera_demo.py` and `scripts/grasp.py`.
 
 ### Model selection
 
@@ -437,11 +460,12 @@ In manual mode, the arm enters gravity-compensation mode. Push the end effector 
 
 The full vision-grasping pipeline:
 
-1. Enable the arm and move to the ready pose
-2. Live camera preview with YOLO object detection and instance segmentation
-3. OBB short-axis estimation for gripper orientation; depth quantile for grasp height
-4. Press `G` to freeze the frame; hand-eye transform computes the target arm pose
-5. Arm moves to pre-grasp point → descends → gripper closes → lifts → returns to ready pose
+1. Initialize the RGB-D camera and confirm the image stream is available
+2. Enable the arm and gripper, then move to the ready pose
+3. Live camera preview with YOLO object detection and instance segmentation
+4. OBB short-axis estimation for gripper orientation; depth quantile for grasp height
+5. Press `G` to freeze the frame; hand-eye transform computes the target arm pose
+6. Arm moves to pre-grasp point → descends → gripper closes → lifts → returns to ready pose
 
 ### `scripts/ordinary_grasp_pipeline.py` — Simplified grasp test
 
@@ -483,7 +507,7 @@ This usually means the robotic arm SDK dependencies are not installed in the cur
 ```bash
 conda activate rebotarm
 conda env update -n rebotarm -f environment.yml
-cd ../reBotArm_control_py && pip install -e .
+cd sdk/reBotArm_control_py && pip install -e .
 ```
 
 ### 2. Pressing `G` does not execute grasping
