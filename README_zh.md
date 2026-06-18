@@ -91,6 +91,7 @@ conda activate rebotarm
 ### Step 3. 安装机械臂控制库
 
 ```bash
+git clone https://github.com/vectorBH6/reBotArm_control_py.git sdk/reBotArm_control_py
 cd sdk/reBotArm_control_py
 pip install -e .
 cd ../..
@@ -433,7 +434,39 @@ YOLO 模型会从 `rebot_grasp/models/` 目录加载；如果模型文件不存�
 
 当模型名包含 `world` / `yoloe`，并且 `yolo.use_world=true` 时，程序会调用 `model.set_classes(custom_classes)`，将 `yolo.custom_classes` 注入为开放词汇类别。普通 `yolov8*-seg.pt` 模型会忽略这组开放词汇类别。
 
-### 手眼标定（首次使用）
+---
+
+## 🎬 运行与调试
+
+### 0. 确认机械臂版本与 SDK 配置
+
+运行会连接机械臂的脚本前，请先确认机械臂版本、电源和 SDK 配置一致：
+
+- 请先完成对应机械臂的基础准备：[B601-DM 快速入门](https://wiki.seeedstudio.com/cn/rebot_b601_dm_getting_started/) 或 [B601-RS 快速入门](https://wiki.seeedstudio.com/cn/rebot_b601_rs_getting_started/)。
+- 在 `sdk/reBotArm_control_py/config/rebotarm.yaml` 中选择对应的硬件配置：
+
+```yaml
+hardware_yaml: rebotarm_dm.yaml
+```
+
+或：
+
+```yaml
+hardware_yaml: rebotarm_rs.yaml
+```
+
+- B601-DM 使用 24V DC 电源，B601-RS 使用 48V DC 电源，请确认电源适配器和接线与机械臂版本一致。
+- 使用 B601-DM 时，请确认 SDK 配置中的串口桥接器设备路径与实际设备一致。
+- 使用 B601-RS 时，运行标定或抓取脚本前请先启动 CAN 接口：
+
+```bash
+sudo ip link set can0 down 2>/dev/null
+sudo ip link set can0 type can bitrate 1000000 restart-ms 100
+sudo ip link set can0 up
+ip -details link show can0
+```
+
+### 1. 手眼标定（抓取前必做）
 
 ```bash
 python scripts/collect_handeye_eih.py
@@ -449,11 +482,7 @@ python scripts/collect_handeye_eih.py --manual
 
 手动模式下，机械臂会进入重力补偿状态。将末端推到合适视角后按 `Enter` 采集，按 `c` 或 `q` 结束并计算。
 
----
-
-## 🎬 Demo 内容介绍
-
-### `scripts/main.py` — 主抓取程序
+### 2. `scripts/main.py` — 主抓取程序
 
 完整的视觉抓取流水线：
 
@@ -464,11 +493,11 @@ python scripts/collect_handeye_eih.py --manual
 5. 按 `G` 冻结帧，经手眼变换计算机械臂目标位姿
 6. 机械臂移动到预抓取点 → 下降 → 夹爪闭合 → 提升 → 回预备位
 
-### `scripts/ordinary_grasp_pipeline.py` — 简化抓取测试
+### 3. `scripts/ordinary_grasp_pipeline.py` — 简化抓取测试
 
 不依赖机械臂，仅验证 OBB 抓取姿态估计和可视化效果，适合调试感知模块。
 
-### `scripts/graspnet_camera_demo.py` — GraspNet 相机估计 Demo
+### 4. `scripts/graspnet_camera_demo.py` — GraspNet 相机估计 Demo
 
 不连接机械臂，仅使用 RGB-D 相机运行 GraspNet 6D 夹取姿态估计。脚本会保留实时相机预览，并使用 YOLO 检测框选择目标区域，再从 GraspNet 全场景候选中筛选目标 bbox 内的可行夹取。按 `G` 或 `Space` 对当前帧推理，按 `R` 恢复实时预览，按 `Q` 或 `Esc` 退出；推理后可通过 Open3D 查看点云与夹取候选。
 
@@ -476,7 +505,7 @@ python scripts/collect_handeye_eih.py --manual
 python scripts/graspnet_camera_demo.py
 ```
 
-### `scripts/grasp.py` — GraspNet 机械臂抓取程序
+### 5. `scripts/grasp.py` — GraspNet 机械臂抓取程序
 
 基于 `graspnet_camera_demo.py` 的估计结果接入机械臂执行流程：YOLO 选择目标，GraspNet 输出 6D 夹取姿态，经手眼标定转换到机械臂基坐标系，再检查 IK 可达性并执行预夹取、夹取、退回动作。调试时建议先使用 `--dry-run` 只打印目标位姿和候选筛选结果。
 
@@ -485,13 +514,9 @@ python scripts/grasp.py --dry-run
 python scripts/grasp.py --target-class "light blue coffee cup"
 ```
 
-### `scripts/object_detection.py` — 基础检测 Demo
+### 6. `scripts/object_detection.py` — 基础检测 Demo
 
 纯 YOLO 检测演示，实时显示检测框和置信度，无抓取逻辑。
-
-### `scripts/collect_handeye_eih.py` — 手眼标定数据采集
-
-Eye-in-Hand 模式手眼标定，支持自动遍历采样和手动重力补偿采样，使用 ArUco 标记，支持 TSAI / PARK / HORAUD 三种求解方法。
 
 ---
 

@@ -93,6 +93,7 @@ Do not install pip `pin>=3.9.0`: the pip `pin` package may require `numpy>=2.2,<
 ### Step 3. Install the robotic arm control library
 
 ```bash
+git clone https://github.com/vectorBH6/reBotArm_control_py.git sdk/reBotArm_control_py
 cd sdk/reBotArm_control_py
 pip install -e .
 cd ../..
@@ -436,7 +437,39 @@ Common choices:
 
 If the model name contains `world` or `yoloe`, and `yolo.use_world=true`, the program calls `model.set_classes(custom_classes)` and injects `yolo.custom_classes` as open-vocabulary categories. Standard `yolov8*-seg.pt` models ignore these open-vocabulary class entries.
 
-### Hand-eye calibration (first-time setup)
+---
+
+## 🎬 Running and Debugging
+
+### 0. Confirm the arm version and SDK configuration
+
+Before running scripts that connect to the robotic arm, make sure the hardware version, power supply, and SDK configuration match:
+
+- Complete the basic setup for your arm first: [B601-DM Quick Start](https://wiki.seeedstudio.com/rebot_b601_dm_getting_started/) or [B601-RS Quick Start](https://wiki.seeedstudio.com/rebot_b601_rs_getting_started/).
+- Select the matching SDK hardware file in `sdk/reBotArm_control_py/config/rebotarm.yaml`:
+
+```yaml
+hardware_yaml: rebotarm_dm.yaml
+```
+
+or:
+
+```yaml
+hardware_yaml: rebotarm_rs.yaml
+```
+
+- B601-DM uses a 24V DC power supply; B601-RS uses a 48V DC power supply. Confirm that the power adapter and wiring match the arm version.
+- For B601-DM, confirm that the serial bridge device in the SDK configuration matches the actual device path.
+- For B601-RS, bring up the CAN interface before running calibration or grasping scripts:
+
+```bash
+sudo ip link set can0 down 2>/dev/null
+sudo ip link set can0 type can bitrate 1000000 restart-ms 100
+sudo ip link set can0 up
+ip -details link show can0
+```
+
+### 1. Hand-eye calibration (required before grasping)
 
 ```bash
 python scripts/collect_handeye_eih.py
@@ -452,11 +485,7 @@ python scripts/collect_handeye_eih.py --manual
 
 In manual mode, the arm enters gravity-compensation mode. Push the end effector to a suitable viewpoint, press `Enter` to capture, and use `c` or `q` to finish and compute the result.
 
----
-
-## 🎬 Demo Description
-
-### `scripts/main.py` — Main grasping program
+### 2. `scripts/main.py` — Main grasping program
 
 The full vision-grasping pipeline:
 
@@ -467,11 +496,11 @@ The full vision-grasping pipeline:
 5. Press `G` to freeze the frame; hand-eye transform computes the target arm pose
 6. Arm moves to pre-grasp point → descends → gripper closes → lifts → returns to ready pose
 
-### `scripts/ordinary_grasp_pipeline.py` — Simplified grasp test
+### 3. `scripts/ordinary_grasp_pipeline.py` — Simplified grasp test
 
 Runs OBB grasp pose estimation and visualization without connecting to the arm. Useful for debugging the perception module in isolation.
 
-### `scripts/graspnet_camera_demo.py` — GraspNet camera estimation demo
+### 4. `scripts/graspnet_camera_demo.py` — GraspNet camera estimation demo
 
 Runs GraspNet 6D grasp pose estimation with only the RGB-D camera, without connecting to the robotic arm. The script keeps a live camera preview, uses YOLO bounding boxes to select the target area, and filters feasible GraspNet full-scene candidates by the target bbox. Press `G` or `Space` to infer the current frame, `R` to resume live preview, and `Q` or `Esc` to quit. After inference, Open3D can visualize the point cloud and grasp candidates.
 
@@ -479,7 +508,7 @@ Runs GraspNet 6D grasp pose estimation with only the RGB-D camera, without conne
 python scripts/graspnet_camera_demo.py
 ```
 
-### `scripts/grasp.py` — GraspNet robotic grasping program
+### 5. `scripts/grasp.py` — GraspNet robotic grasping program
 
 Connects the GraspNet estimate to the robotic arm execution flow. YOLO selects the target, GraspNet outputs a 6D grasp pose, hand-eye calibration transforms it into the robot base frame, and the script checks IK reachability before running the pre-grasp, grasp, and retreat motion sequence. For debugging, start with `--dry-run` to print the target poses and candidate filtering result without moving the arm.
 
@@ -488,13 +517,9 @@ python scripts/grasp.py --dry-run
 python scripts/grasp.py --target-class "light blue coffee cup"
 ```
 
-### `scripts/object_detection.py` — Basic detection demo
+### 6. `scripts/object_detection.py` — Basic detection demo
 
 Pure YOLO detection with real-time bounding boxes and confidence scores. No grasping logic.
-
-### `scripts/collect_handeye_eih.py` — Hand-eye calibration data collection
-
-Eye-in-Hand hand-eye calibration using ArUco markers, with both automatic pose traversal and manual gravity-compensation sampling. Supports TSAI, PARK, and HORAUD solvers.
 
 ---
 
