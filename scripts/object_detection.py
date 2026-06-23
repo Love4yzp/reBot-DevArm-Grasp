@@ -1,10 +1,9 @@
 """
-统一版 3D 视觉目标检测管线 (支持 D435i / Gemini 2 双相机接入)
-特性：外部 YAML 配置化、动态模型加载、统一 3D 坐标系转换
+3D object detection preview.
 
-用法：
+Usage:
     cd /your/path/to/project
-    python scripts/main.py
+    python scripts/object_detection.py
 """
 
 import os
@@ -12,13 +11,20 @@ os.environ.setdefault("QT_QPA_FONTDIR", "/usr/share/fonts/truetype")
 
 import sys
 import cv2
-import yaml
-import numpy as np
 from pathlib import Path
 from ultralytics import YOLO
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT_STR = str(PROJECT_ROOT)
+if PROJECT_ROOT_STR not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT_STR)
+
+from drivers.camera import make_camera
+from utils.camera_utils import load_config
+from utils.ordinary_grasp import get_depth_mm
+
 # ==========================================
-# 全局状态与鼠标回调
+# Mouse state
 # ==========================================
 clicked_point = {"u": -1, "v": -1}
 
@@ -27,35 +33,14 @@ def mouse_callback(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
         clicked_point["u"] = x
         clicked_point["v"] = y
-        print(f"[测试] 鼠标点击锁定像素: (u={x}, v={y})")
+        print(f"[Test] Clicked pixel: (u={x}, v={y})")
 
 # ==========================================
-# 通用辅助函数
-# ==========================================
-def load_config(yaml_path):
-    if not os.path.exists(yaml_path):
-        print(f"[错误] 找不到配置文件: {yaml_path}，请检查路径。")
-        sys.exit(1)
-    with open(yaml_path, 'r', encoding='utf-8') as f:
-        return yaml.safe_load(f)
-
-def get_depth_mm(depth_map: np.ndarray, x: int, y: int, roi_size: int = 5) -> float:
-    """从深度图（uint16，单位 mm）采样中位数深度。"""
-    h, w = depth_map.shape
-    half = roi_size // 2
-    x_min, x_max = max(0, x - half), min(w, x + half + 1)
-    y_min, y_max = max(0, y - half), min(h, y + half + 1)
-    roi = depth_map[y_min:y_max, x_min:x_max]
-    valid = roi[roi > 0]
-    return float(np.median(valid)) if len(valid) > 0 else 0.0
-
-# ==========================================
-# 主流程
+# Main
 # ==========================================
 def main():
-    project_root = Path(__file__).resolve().parent.parent
-    config_path  = project_root / "config" / "default.yaml"
-    models_dir   = project_root / "models"
+    config_path  = PROJECT_ROOT / "config" / "default.yaml"
+    models_dir   = PROJECT_ROOT / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
 
     cfg = load_config(config_path)
@@ -70,42 +55,39 @@ def main():
 
     model_path = models_dir / model_name
 
-    print(f"=== 初始化 YOLO 模型 ===")
-    print(f"尝试加载模型: {model_path}")
+    print(f"=== Init YOLO ===")
+    print(f"Load model: {model_path}")
     model = YOLO(str(model_path))
 
     is_open_vocab = use_world and ("world" in model_name.lower() or "yoloe" in model_name.lower())
     if is_open_vocab:
-        print(f"启用开放词汇 (Open-Vocabulary) 模式，注入 {len(custom_classes)} 种物品概念...")
+        print(f"Enable open vocabulary: {len(custom_classes)} classes")
         model.set_classes(custom_classes)
 
-    print(f"YOLO 模型加载完毕！使用计算平台: {device.upper()}")
+    print(f"YOLO ready on {device.upper()}")
     if "26" in model_name:
-        print(f"[*] 检测到 YOLO26 家族模型，将启用免 NMS 端到端极速推理特性。")
+        print(f"[Info] YOLO26 end-to-end inference enabled.")
 
-    # ── 相机（统一通过驱动接口）──
-    print(f"\n=== 初始化相机: {cam_type} ===")
-    sys.path.insert(0, str(project_root))
-    from drivers.camera import make_camera
-
+    # Camera
+    print(f"\n=== Init camera: {cam_type} ===")
     try:
         cam = make_camera(cfg)
     except ValueError as e:
-        print(f"\n[致命错误] {e}")
+        print(f"\n[Fatal] {e}")
         sys.exit(1)
 
     try:
         cam.open()
     except RuntimeError as e:
-        print(f"\n[致命错误] {e}")
+        print(f"\n[Fatal] {e}")
         sys.exit(1)
 
     K  = cam.K
     fx, fy = float(K[0, 0]), float(K[1, 1])
     cx, cy = float(K[0, 2]), float(K[1, 2])
-    print(f"[相机就绪] {cam_type} (fx:{fx:.2f}, cx:{cx:.2f})")
+    print(f"[Camera] {cam_type} (fx:{fx:.2f}, cx:{cx:.2f})")
 
-    print("\n[操作提示] 按鼠标左键进行坐标点测，按 [Q] 退出程序")
+    print("\n[Keys] Left click=sample point  Q=quit")
     window_name = f"Unified 3D Vision ({cam_type})"
     cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
     cv2.setMouseCallback(window_name, mouse_callback)
@@ -152,7 +134,7 @@ def main():
                         cv2.putText(color_image, f"{class_name} (No Depth)",
                                     (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
-            # 鼠标点测
+            # Point sampling
             cu, cv_y = clicked_point["u"], clicked_point["v"]
             if cu != -1 and cv_y != -1 and depth_mm is not None:
                 h_dm, w_dm = depth_mm.shape

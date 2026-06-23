@@ -1,13 +1,5 @@
 """
-main.py — 基于短轴估计的机械臂夹取主程序
-=========================================
-流程：
-  1. 初始化 RGB-D 相机，确认图像流可用
-  2. 机械臂 + 夹爪使能，移动到预备高位
-  3. 实时相机预览 + YOLO 检测 + 短轴夹取姿态估计
-  4. G 键：冻结当前帧并执行夹取（--dry-run 只打印坐标）
-  5. R 键：恢复实时预览
-  6. Q 键：退出，释放夹爪并回零位
+main.py - ordinary short-axis grasp demo
 """
 
 from __future__ import annotations
@@ -81,29 +73,29 @@ def _execute_grasp(
     print(f"[Grasp] grasp     xyz=({xg:+.3f},{yg:+.3f},{zg:+.3f})  rpy=({rxg:+.3f},{ryg:+.3f},{rzg:+.3f})")
 
     if dry_run:
-        print("[Grasp] --dry-run: 跳过执行")
+        print("[Grasp] dry run; skip motion")
         return False
 
-    print("[Grasp] 打开夹爪...")
+    print("[Grasp] Open gripper")
     grasp_driver.open_gripper()
 
-    print("[Grasp] 移动到预夹取位...")
+    print("[Grasp] Move to pregrasp")
     if not controller.move_to_traj(xp, yp, zp, rxp, ryp, rzp, duration=2.0):
-        print("[Grasp] 预夹取 IK 失败，中止")
+        print("[Grasp] Pregrasp IK failed")
         return False
     _wait_motion(controller, 2.0)
 
-    print("[Grasp] 移动到夹取位...")
+    print("[Grasp] Move to grasp")
     if not controller.move_to_traj(xg, yg, zg, rxg, ryg, rzg, duration=1.5):
-        print("[Grasp] 夹取 IK 失败，中止")
+        print("[Grasp] Grasp IK failed")
         return False
     _wait_motion(controller, 1.5)
 
-    print("[Grasp] 夹取中...")
+    print("[Grasp] Closing")
     ok = grasp_driver.grasp()
-    print("[Grasp] ✓ 夹取成功，力控保持中" if ok else "[Grasp] 空夹取")
+    print("[Grasp] Holding object" if ok else "[Grasp] Empty grasp")
 
-    print("[Grasp] 返回预备位...")
+    print("[Grasp] Return ready")
     _move_ready(controller, ready_cfg)
     return ok
 
@@ -139,7 +131,7 @@ def _render_display(
 
 def _print_best_grasp(grasp: GraspPose) -> None:
     tcp_rotation = canonicalize_parallel_gripper_tcp_rotation(grasp.tcp_rotation)
-    print("\n[G] 当前最佳夹取:")
+    print("\n[G] Best grasp:")
     print(f"  class={grasp.class_name} conf={grasp.conf:.3f}")
     print(f"  center_px={grasp.center_px} angle_deg={grasp.angle_deg:.2f}")
     print(f"  jaw_width_m={grasp.jaw_width_m:.4f} object_length_m={grasp.object_length_m:.4f}")
@@ -149,9 +141,9 @@ def _print_best_grasp(grasp: GraspPose) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="基于短轴估计的机械臂夹取主程序")
+    parser = argparse.ArgumentParser(description="Ordinary short-axis grasp demo")
     parser.add_argument("--config", default="config/default.yaml")
-    parser.add_argument("--dry-run", action="store_true", help="只估计夹取姿态，不移动机械臂")
+    parser.add_argument("--dry-run", action="store_true", help="estimate only; do not move the arm")
     return parser.parse_args()
 
 
@@ -165,7 +157,7 @@ def main() -> int:
         {"x": 0.25, "y": 0.0, "z": 0.35, "roll": 0.0, "pitch": 1.2, "yaw": 0.0, "duration": 3.0},
     )
     cam_cfg = cfg.get("camera", {})
-    print(f"=== 相机: {cam_cfg.get('type')} ===")
+    print(f"=== Camera: {cam_cfg.get('type')} ===")
     cam = make_camera(cfg)
 
     last_results: list[Any] = []
@@ -177,9 +169,9 @@ def main() -> int:
     fps_timer = time.perf_counter()
     fps_value = 0.0
 
-    window_name = "Main — Ordinary Grasp"
+    window_name = "Main - Ordinary Grasp"
     cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
-    print("\n[Keys]  G=夹取  R=恢复  Q/ESC=退出\n")
+    print("\n[Keys]  G=grasp  R=resume  Q/ESC=quit\n")
 
     controller: Optional[RebotArmEndPose] = None
     rebotarm: Optional[RebotArm] = None
@@ -196,7 +188,7 @@ def main() -> int:
         cam_type = str(cam_cfg.get("type", "")).lower()
         T_hand_eye, hand_eye_mode = load_hand_eye(PROJECT_ROOT, cam_type)
         if T_hand_eye is None or hand_eye_mode != "eye_in_hand":
-            print("[WARN] 手眼标定不可用或非 eye_in_hand，夹取执行将被禁用")
+            print("[WARN] Hand-eye calibration unavailable; grasp execution disabled")
             T_hand_eye = None
 
         yolo_cfg = cfg.get("yolo", {})
@@ -208,10 +200,10 @@ def main() -> int:
         depth_quantile = float(grasp_cfg.get("depth_quantile", 0.75))
         infer_every = max(1, int(gp_cfg.get("infer_every_live", 2)))
 
-        print(f"=== 加载 YOLO: {model_name} ===")
+        print(f"=== Load YOLO: {model_name} ===")
         model, yolo_opts = load_yolo(cfg, project_root=PROJECT_ROOT)
 
-        print("=== 初始化机械臂 ===")
+        print("=== Init robot ===")
         selected = selected_arm_config(robot_cfg.get("repo_root"))
         rebotarm = RebotArm()
         controller = RebotArmEndPose(rebotarm, arm_control_mode=selected.controller_mode)
@@ -223,9 +215,9 @@ def main() -> int:
         )
         grasp_driver.start()
         robot_ready = True
-        print(f"[Robot] 控制模式: {selected.controller_mode}")
+        print(f"[Robot] mode: {selected.controller_mode}")
 
-        print("[Robot] 移动到预备位置...")
+        print("[Robot] Move ready")
         _move_ready(controller, ready_cfg)
 
         while True:
@@ -251,7 +243,7 @@ def main() -> int:
                 )
                 last_grasps = estimate_grasps(last_results, depth_mm, K, depth_quantile=depth_quantile)
 
-            status = f"{'FROZEN' if frozen else 'LIVE'} {fps_value:.1f}fps | G=夹取 R=恢复 Q=退出"
+            status = f"{'FROZEN' if frozen else 'LIVE'} {fps_value:.1f}fps | G=grasp R=resume Q=quit"
             best_live = select_best_grasp(last_grasps)
             if frozen and last_display is not None:
                 display = last_display.copy()
@@ -271,10 +263,10 @@ def main() -> int:
                 continue
 
             if key in (ord("g"), ord("G")):
-                print("\n[G] 采帧并估计夹取姿态...")
+                print("\n[G] Capture and estimate grasp")
                 snap_color, snap_depth = cam.get_frame()
                 if snap_color is None or snap_depth is None:
-                    print("[G] 采帧失败")
+                    print("[G] Frame capture failed")
                     continue
 
                 snap_results = model.predict(
@@ -287,7 +279,7 @@ def main() -> int:
                 snap_grasps = estimate_grasps(snap_results, snap_depth, K, depth_quantile=depth_quantile)
                 best = select_best_grasp(snap_grasps)
                 if best is None:
-                    print("[G] 未找到有效夹取候选")
+                    print("[G] No valid grasp")
                     continue
 
                 _print_best_grasp(best)
@@ -299,7 +291,7 @@ def main() -> int:
                 last_grasps = snap_grasps
 
                 if T_hand_eye is None:
-                    print("[G] 手眼标定不可用，无法执行夹取")
+                    print("[G] Hand-eye calibration unavailable")
                     continue
 
                 T_cam2base = _cam_to_base(T_hand_eye, grasp_driver, cfg)
@@ -312,25 +304,25 @@ def main() -> int:
                 _execute_grasp(controller, grasp_driver, grasp6d, pre6d, ready_cfg, dry_run=args.dry_run)
 
     finally:
-        print("\n[退出] 释放夹爪并回零...")
+        print("\n[Exit] Release gripper and home")
         try:
             if robot_ready and grasp_driver is not None and controller is not None and getattr(controller, "_running", False):
                 grasp_driver.release_gripper()
         except Exception as exc:
-            print(f"[退出] {exc}")
+            print(f"[Exit] {exc}")
         try:
             if controller is not None and getattr(controller, "_running", False):
                 controller.end()
             elif rebotarm is not None:
                 rebotarm.disconnect()
         except Exception as exc:
-            print(f"[退出] {exc}")
+            print(f"[Exit] {exc}")
         try:
             cam.close()
         except Exception:
             pass
         cv2.destroyAllWindows()
-        print("已退出。")
+        print("Done.")
 
     return 0
 

@@ -54,7 +54,7 @@ def find_rebot_repo_root(hint: Optional[str] = None) -> Path:
         repo = repo.resolve()
     if _is_rebot_repo_root(repo):
         return repo
-    raise FileNotFoundError(f"找不到 reBotArm_control_py 仓库: {repo}")
+    raise FileNotFoundError(f"reBotArm_control_py repo not found: {repo}")
 
 
 def ensure_rebot_sdk_in_syspath(hint: Optional[str] = None) -> Path:
@@ -69,7 +69,7 @@ def _read_yaml(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     if not isinstance(data, dict):
-        raise ValueError(f"{path} 格式应为 YAML 字典")
+        raise ValueError(f"{path} must be a YAML mapping")
     return data
 
 
@@ -79,14 +79,14 @@ def selected_hardware_yaml(repo_root: Optional[str] = None) -> Path:
     global_cfg = _read_yaml(config_dir / "rebotarm.yaml")
     hw_yaml = global_cfg.get("hardware_yaml")
     if not hw_yaml:
-        raise ValueError(f"{config_dir / 'rebotarm.yaml'} 缺少 hardware_yaml")
+        raise ValueError(f"{config_dir / 'rebotarm.yaml'} missing hardware_yaml")
 
     hw_path = Path(str(hw_yaml))
     if not hw_path.is_absolute():
         hw_path = config_dir / hw_path
     hw_path = hw_path.resolve()
     if not hw_path.is_file():
-        raise FileNotFoundError(f"找不到硬件配置: {hw_path}")
+        raise FileNotFoundError(f"Hardware config not found: {hw_path}")
     return hw_path
 
 
@@ -98,7 +98,7 @@ def selected_arm_config(repo_root: Optional[str] = None) -> SelectedArmConfig:
         return SelectedArmConfig(arm_type="dm", controller_mode="posvel")
     if stem.endswith("_rs") or stem == "rs":
         return SelectedArmConfig(arm_type="rs", controller_mode="mit")
-    raise ValueError(f"无法从硬件配置判断机械臂类型: {hw_path}")
+    raise ValueError(f"Cannot infer arm type from hardware config: {hw_path}")
 
 
 class GraspDriver:
@@ -120,12 +120,12 @@ class GraspDriver:
         self._arm_group = arm.groups.get("arm")
         self._gripper_group = arm.groups.get("gripper")
         if self._arm_group is None:
-            raise ValueError("硬件配置缺少 groups.arm")
+            raise ValueError("Hardware config missing groups.arm")
         if self._gripper_group is None or not arm.has_gripper:
-            raise ValueError("硬件配置缺少 groups.gripper")
+            raise ValueError("Hardware config missing groups.gripper")
         gripper_jcfgs = getattr(self._gripper_group, "_jcfgs", [])
         if not gripper_jcfgs:
-            raise ValueError("groups.gripper 未配置关节")
+            raise ValueError("groups.gripper has no joints")
         self._gripper_name = gripper_jcfgs[0].name
         self._gripper_motor: Any = None
 
@@ -256,12 +256,12 @@ class GraspDriver:
             if state is not None:
                 return state
             time.sleep(0.02)
-        raise RuntimeError("夹爪反馈未就绪")
+        raise RuntimeError("Gripper feedback is not ready")
 
     def get_gripper_state(self) -> tuple[float, float, float]:
         state = self._read_gripper_state_cached()
         if state is None:
-            raise RuntimeError("夹爪反馈未就绪")
+            raise RuntimeError("Gripper feedback is not ready")
         return state
 
     def _set_position_target(self, target: float) -> None:

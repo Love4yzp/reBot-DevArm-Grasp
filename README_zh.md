@@ -341,11 +341,6 @@ detection:
 
 robot:
   repo_root: null
-  control:
-    dm:
-      arm_control_mode: posvel
-    rs:
-      arm_control_mode: mit
   gripper:
     dm:
       angle_open: 5.0
@@ -408,7 +403,6 @@ graspnet:
 - `detection.conf_threshold`：YOLO 检测置信度阈值。
 - `detection.iou_threshold`：YOLO NMS IoU 阈值。
 - `robot.repo_root`：`reBotArm_control_py` 仓库根目录；为 `null` 时默认使用 `sdk/reBotArm_control_py`。
-- `robot.control.dm` / `robot.control.rs`：按 SDK 当前硬件配置自动选择的控制模式覆写。默认 DM 使用 `posvel`，RS 使用 `mit`。
 - `robot.gripper.dm` / `robot.gripper.rs`：按 SDK 当前硬件配置自动选择的两组夹爪参数。`angle_open`、`close_torque`、`default_force` 均填写正数数值；`counterclockwise` 表示闭合时采用的电机转动方向，代码会据此推导张开角度和闭合力矩的符号。`tau_max` 为力矩上限。其余夹爪行为参数在 `drivers/robot/grasp_driver.py` 中定义。
 - `robot.ready_pose`：启动后先到达的预备位，抓取结束后也会回到这里。
 - 切换 DM/RS 机械臂：在 SDK 的 `sdk/reBotArm_control_py/config/rebotarm.yaml` 中修改 `hardware_yaml`，选择 `rebotarm_dm.yaml` 或 `rebotarm_rs.yaml`。

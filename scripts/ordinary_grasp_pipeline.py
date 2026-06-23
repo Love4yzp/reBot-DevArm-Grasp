@@ -1,13 +1,7 @@
 """
-简化版夹取姿态测试脚本
+Ordinary grasp test.
 
-思路：
-  1. YOLO 检测目标
-  2. 优先使用 OBB，拿不到时退化为 mask/bbox 的最小外接矩形
-  3. 用矩形短边作为夹爪开合方向
-  4. 用 mask 中央截面中点 + 深度分位数反投影得到 3D 抓取点
-
-用法：
+Usage:
   conda activate seeed
   python scripts/ordinary_grasp_pipeline.py
 """
@@ -19,7 +13,6 @@ import sys
 from pathlib import Path
 
 import cv2
-import yaml
 from ultralytics import YOLO
 
 
@@ -30,6 +23,7 @@ for _path in (PROJECT_ROOT,):
         sys.path.insert(0, path_str)
 
 from drivers.camera import make_camera
+from utils.camera_utils import load_config
 from utils.ordinary_grasp import draw_grasp, estimate_grasps, get_depth_mm, select_best_grasp
 from utils.transforms import canonicalize_parallel_gripper_tcp_rotation, rotation_matrix_to_euler_zyx
 
@@ -42,20 +36,12 @@ def mouse_callback(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
         clicked_point["u"] = x
         clicked_point["v"] = y
-        print(f"[测试] 鼠标点击锁定像素: (u={x}, v={y})")
-
-
-def load_config(yaml_path: Path):
-    if not yaml_path.exists():
-        print(f"[错误] 找不到配置文件: {yaml_path}")
-        raise SystemExit(1)
-    with open(yaml_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        print(f"[Test] Clicked pixel: (u={x}, v={y})")
 
 
 def print_best_grasp(grasp) -> None:
     tcp_rotation = canonicalize_parallel_gripper_tcp_rotation(grasp.tcp_rotation)
-    print("\n[G] 当前最佳夹取:")
+    print("\n[G] Best grasp:")
     print(f"  class={grasp.class_name} conf={grasp.conf:.3f}")
     print(f"  center_px={grasp.center_px} angle_deg={grasp.angle_deg:.2f}")
     print(f"  jaw_width_m={grasp.jaw_width_m:.4f} object_length_m={grasp.object_length_m:.4f}")
@@ -83,27 +69,27 @@ def main():
     iou_thres = float(det_cfg.get("iou_threshold", 0.45))
     depth_quantile = float(grasp_cfg.get("depth_quantile", 0.75))
 
-    print("=== 初始化 YOLO 模型 ===")
+    print("=== Init YOLO ===")
     model_path = models_dir / model_name
-    print(f"加载模型: {model_path}")
+    print(f"Load model: {model_path}")
     model = YOLO(str(model_path))
     if use_world and ("world" in model_name.lower() or "yoloe" in model_name.lower()):
         model.set_classes(custom_classes)
-        print(f"开放词汇类别: {custom_classes}")
+        print(f"Open-vocabulary classes: {custom_classes}")
 
-    print(f"\n=== 初始化相机: {cam_type} ===")
+    print(f"\n=== Init camera: {cam_type} ===")
     cam = make_camera(cfg)
     cam.open()
     cam.warm_up(10)
     K = cam.K.astype("float32")
     fx, fy = float(K[0, 0]), float(K[1, 1])
     cx, cy = float(K[0, 2]), float(K[1, 2])
-    print(f"[相机就绪] fx={fx:.2f}, fy={fy:.2f}, cx={cx:.2f}, cy={cy:.2f}")
+    print(f"[Camera] fx={fx:.2f}, fy={fy:.2f}, cx={cx:.2f}, cy={cy:.2f}")
 
     window_name = f"Ordinary Grasp Test ({cam_type})"
     cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
     cv2.setMouseCallback(window_name, mouse_callback)
-    print("\n[操作提示] 鼠标左键点测深度, 按 G 打印最佳夹取, 按 Q 退出")
+    print("\n[Keys] Left click=sample depth  G=print best  Q=quit")
 
     try:
         while True:

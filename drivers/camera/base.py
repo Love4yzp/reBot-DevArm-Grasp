@@ -1,4 +1,4 @@
-"""相机驱动基类。"""
+"""Camera driver base classes."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -7,51 +7,67 @@ from typing import Optional, Tuple
 import numpy as np
 
 
+class CameraFrameError(RuntimeError):
+    """Raised after repeated camera frame acquisition failures."""
+
+
 class CameraDriver(ABC):
-    """统一颜色 + 深度流接口。
+    """Common color and depth camera interface."""
 
-    子类实现 open / close / get_frame / K / D。
-    调用 setup_aruco() 后可用 detect_aruco() / draw_aruco() 便捷方法。
-    """
+    _FRAME_FAIL_WARN = 10
+    _FRAME_FAIL_LIMIT = 60
 
-    # ── 生命周期 ────────────────────────────────────────────────────────────
+    def _reset_frame_failures(self) -> None:
+        self._frame_failures = 0
+
+    def _record_frame_failure(self, reason: str) -> None:
+        count = int(getattr(self, "_frame_failures", 0)) + 1
+        self._frame_failures = count
+        if count == self._FRAME_FAIL_WARN:
+            print(f"[Camera] {count} consecutive frame failures: {reason}")
+        if count >= self._FRAME_FAIL_LIMIT:
+            raise CameraFrameError(
+                f"Camera failed for {count} consecutive frames: {reason}\n"
+                "  Check connection, USB permissions, or other camera clients."
+            )
+
+    # Lifecycle
 
     @abstractmethod
     def open(self) -> None:
-        """初始化并打开相机流。"""
+        """Open camera streams."""
 
     @abstractmethod
     def close(self) -> None:
-        """停止并释放相机资源。"""
+        """Stop streams and release resources."""
 
-    # ── 帧获取 ───────────────────────────────────────────────────────────────
+    # Frames
 
     @abstractmethod
     def get_frame(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """获取一帧。
+        """Return one color/depth frame pair.
 
         Returns:
-            (color_bgr, depth_mm)：
-              color_bgr — uint8 BGR 图像；不可用时为 None。
-              depth_mm  — uint16 numpy 数组，单位毫米；不可用时为 None。
+            color_bgr: uint8 BGR image, or None.
+            depth_mm: uint16 depth image in millimeters, or None.
         """
 
-    # ── 内参 ─────────────────────────────────────────────────────────────────
+    # Intrinsics
 
     @property
     @abstractmethod
     def K(self) -> np.ndarray:
-        """相机内参矩阵 (3, 3) float64。"""
+        """Camera matrix, shape (3, 3), float64."""
 
     @property
     @abstractmethod
     def D(self) -> np.ndarray:
-        """畸变系数 (1, N) float64。"""
+        """Distortion coefficients, shape (1, N), float64."""
 
-    # ── 便捷方法 ─────────────────────────────────────────────────────────────
+    # Helpers
 
     def warm_up(self, n_frames: int = 20) -> None:
-        """丢弃前 n_frames 帧，等待曝光和白平衡稳定。"""
+        """Drop early frames while exposure settles."""
         for _ in range(n_frames):
             self.get_frame()
 
@@ -61,25 +77,25 @@ class CameraDriver(ABC):
         dict_id: int = 0,
         target_marker_id: Optional[int] = None,
     ) -> None:
-        """初始化 ArUco 检测器（使用本相机的内参/畸变）。
+        """Create an ArUco detector using this camera calibration.
 
         Args:
-            marker_length_m:  标记实际边长（米）
-            dict_id:          cv2.aruco 字典 ID，默认 DICT_4X4_50 = 0
-            target_marker_id: 只检测该 ID；None = 取距离最近的
+            marker_length_m: marker side length in meters.
+            dict_id: cv2.aruco dictionary id.
+            target_marker_id: detect only this id; None selects the nearest one.
         """
         from calibration.aruco_pose import ArUcoDetector
         self._aruco = ArUcoDetector(marker_length_m, dict_id, target_marker_id)
 
     def detect_aruco(self, bgr: np.ndarray):
-        """检测 ArUco 标记，返回 MarkerPose 或 None（需先 setup_aruco）。"""
+        """Detect an ArUco marker. Call setup_aruco first."""
         return self._aruco.detect(bgr, self.K, self.D)
 
     def draw_aruco(self, bgr: np.ndarray) -> np.ndarray:
-        """在图像上绘制检测到的所有 ArUco 标记（需先 setup_aruco）。"""
+        """Draw detected ArUco markers. Call setup_aruco first."""
         return self._aruco.draw_detected(bgr, self.K, self.D)
 
-    # ── 上下文管理器 ─────────────────────────────────────────────────────────
+    # Context manager
 
     def __enter__(self) -> "CameraDriver":
         self.open()
