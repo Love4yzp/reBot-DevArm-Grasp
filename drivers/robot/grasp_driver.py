@@ -1,14 +1,18 @@
-"""
-Small grasp-side helper for reBotArm visual grasping.
+"""Small grasp-side helper for reBotArm visual grasping.
 
-The SDK remains responsible for arm connection, mode switching, Cartesian
-planning, gravity compensation, and the control loop. This module only covers
-the pieces that the vision stack needs in addition to the SDK:
+The SDK owns arm connection, mode switching, Cartesian planning, gravity
+compensation, and the control loop. This module provides only the extra
+gripper and pose helpers used by the vision workflows.
 
-    - resolve the local SDK path
-    - read the SDK YAML to identify the selected arm type
-    - open / force-grasp / release the gripper
-    - read the current TCP pose
+selected_arm_config(): read the SDK hardware YAML and choose controller mode.
+
+GraspDriver:
+  start(): start SDK control and attach gripper tick handling.
+  open_gripper(): open to a requested jaw distance.
+  grasp(): close with force control and report object contact.
+  release_gripper(): open and return the gripper to closed rest.
+  get_gripper_state(): return cached position, velocity, and torque.
+  get_tcp_pose(): return the current TCP pose as a 4x4 matrix.
 """
 
 from __future__ import annotations

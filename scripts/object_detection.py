@@ -1,8 +1,11 @@
 """
 3D object detection preview.
 
+Keys:
+  Left click: sample depth at a pixel.
+  Q/Esc: exit.
+
 Usage:
-    cd /your/path/to/project
     python scripts/object_detection.py
 """
 

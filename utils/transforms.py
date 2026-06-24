@@ -1,4 +1,4 @@
-"""坐标变换工具函数。"""
+"""Coordinate transform utilities."""
 import numpy as np
 
 
@@ -31,12 +31,12 @@ def _nearest_rotation_matrix(R: np.ndarray) -> np.ndarray:
 
 def pose6d_to_mat4(x, y, z, rx, ry, rz, degrees=False) -> np.ndarray:
     """
-    将 6D 位姿 (平移 + ZYX 内旋欧拉角) 转换为 4×4 齐次变换矩阵。
+    Convert a 6D pose to a 4x4 homogeneous transform.
 
     Args:
-        x, y, z: 平移 (米)
-        rx, ry, rz: 欧拉角，ZYX 内旋约定 (roll=rx around X, pitch=ry around Y, yaw=rz around Z)
-        degrees: True 时输入为度，False 时为弧度
+        x, y, z: translation in meters.
+        rx, ry, rz: intrinsic ZYX Euler angles in roll, pitch, yaw order.
+        degrees: True when angles are in degrees; False for radians.
 
     Returns:
         T: (4, 4) numpy array
@@ -44,26 +44,26 @@ def pose6d_to_mat4(x, y, z, rx, ry, rz, degrees=False) -> np.ndarray:
     if degrees:
         rx, ry, rz = np.radians(rx), np.radians(ry), np.radians(rz)
 
-    # 绕 X 轴
+    # Rotation around X.
     Rx = np.array([
         [1,          0,           0],
         [0,  np.cos(rx), -np.sin(rx)],
         [0,  np.sin(rx),  np.cos(rx)],
     ])
-    # 绕 Y 轴
+    # Rotation around Y.
     Ry = np.array([
         [ np.cos(ry), 0, np.sin(ry)],
         [          0, 1,          0],
         [-np.sin(ry), 0, np.cos(ry)],
     ])
-    # 绕 Z 轴
+    # Rotation around Z.
     Rz = np.array([
         [np.cos(rz), -np.sin(rz), 0],
         [np.sin(rz),  np.cos(rz), 0],
         [         0,           0, 1],
     ])
 
-    # ZYX 内旋 = R = Rz @ Ry @ Rx
+    # Intrinsic ZYX rotation: R = Rz @ Ry @ Rx.
     R = Rz @ Ry @ Rx
 
     T = np.eye(4, dtype=np.float64)
@@ -74,11 +74,11 @@ def pose6d_to_mat4(x, y, z, rx, ry, rz, degrees=False) -> np.ndarray:
 
 def quat_to_mat4(x, y, z, qx, qy, qz, qw) -> np.ndarray:
     """
-    将平移 + 四元数转换为 4×4 齐次变换矩阵。
+    Convert translation and quaternion to a 4x4 homogeneous transform.
 
     Args:
-        x, y, z: 平移 (米)
-        qx, qy, qz, qw: 四元数 (Hamilton 约定)
+        x, y, z: translation in meters.
+        qx, qy, qz, qw: Hamilton quaternion.
 
     Returns:
         T: (4, 4) numpy array
@@ -100,7 +100,7 @@ def quat_to_mat4(x, y, z, qx, qy, qz, qw) -> np.ndarray:
 
 def mat4_to_pose6d(T: np.ndarray) -> tuple:
     """
-    将 4×4 齐次变换矩阵转换为 (x, y, z, rx, ry, rz)，ZYX 内旋约定，弧度。
+    Convert a 4x4 transform to (x, y, z, rx, ry, rz) in radians.
     """
     x, y, z = T[0, 3], T[1, 3], T[2, 3]
     rpy = rotation_matrix_to_euler_zyx(T[:3, :3])
@@ -108,7 +108,7 @@ def mat4_to_pose6d(T: np.ndarray) -> tuple:
 
 
 def rotation_matrix_to_euler_zyx(R: np.ndarray) -> np.ndarray:
-    """将旋转矩阵转换为 ZYX 内旋欧拉角 (roll, pitch, yaw)。"""
+    """Convert a rotation matrix to intrinsic ZYX Euler angles."""
     R = _nearest_rotation_matrix(R)
     sy = np.sqrt(R[0, 0] ** 2 + R[1, 0] ** 2)
     if sy > 1e-6:
@@ -123,11 +123,12 @@ def rotation_matrix_to_euler_zyx(R: np.ndarray) -> np.ndarray:
 
 
 def canonicalize_parallel_gripper_tcp_rotation(R: np.ndarray) -> np.ndarray:
-    """规范并联夹爪 TCP 姿态的等效 180 度扭转。
+    """Pick a stable equivalent TCP rotation for a parallel gripper.
 
-    对于对称的并联夹爪，沿工具 X 轴旋转 180 度通常是抓取等效的。
-    这里在 ``R`` 和 ``R @ Rx(pi)`` 之间选择 roll 绝对值更小的那一支，
-    让输出的 RPY 更贴近人的直觉，也更方便调试。
+    For a symmetric parallel gripper, a 180-degree twist around the tool X axis
+    is usually grasp-equivalent. Choose the branch between ``R`` and
+    ``R @ Rx(pi)`` that has the smaller absolute roll, making the output RPY
+    easier to inspect and debug.
     """
     R = _nearest_rotation_matrix(R)
     alt = R @ _ROT_X_PI
@@ -142,17 +143,17 @@ def grasp_axes_to_rebot_tcp_rotation(
     open_axis: np.ndarray,
     approach_axis: np.ndarray,
 ) -> np.ndarray:
-    """将抓取坐标系映射到 reBotArm 的 TCP 坐标系。
+    """Map grasp-frame axes to the reBotArm TCP frame.
 
-    视觉抓取结果约定：
+    Vision grasp convention:
       - X = grip_axis
       - Y = open_axis
       - Z = approach_axis
 
-    reBotArm 末端期望：
-      - X = 工具前向 / 接近方向
-      - Y = 夹爪开合方向
-      - Z = 由右手系补齐
+    reBotArm TCP convention:
+      - X = tool-forward / approach direction
+      - Y = gripper opening direction
+      - Z = right-handed completion
     """
     grip = np.asarray(grip_axis, dtype=np.float64)
     open_vec = np.asarray(open_axis, dtype=np.float64)
@@ -170,7 +171,7 @@ def grasp_axes_to_rebot_tcp_rotation(
     tcp_z = np.cross(tcp_x, tcp_y)
     tcp_z /= max(np.linalg.norm(tcp_z), 1e-8)
 
-    # 期望 tcp_z 与 grip 同向（取反后方向一致）。
+    # Keep tcp_z aligned with the grip axis after the approach-axis flip.
     if float(np.dot(tcp_z, grip)) < 0.0:
         tcp_y = -tcp_y
         tcp_z = -tcp_z
@@ -182,10 +183,10 @@ def grasp_axes_to_rebot_tcp_rotation(
 
 
 def grasp_rotation_to_rebot_tcp_rotation(grasp_rotation: np.ndarray) -> np.ndarray:
-    """将 [grip, open, approach] 旋转矩阵转换为 reBotArm TCP 旋转矩阵。"""
+    """Convert a [grip, open, approach] rotation matrix to reBotArm TCP rotation."""
     R = np.asarray(grasp_rotation, dtype=np.float64)
     if R.shape != (3, 3):
-        raise ValueError(f"grasp_rotation 必须为 (3, 3)，实际为 {R.shape}")
+        raise ValueError(f"grasp_rotation must be (3, 3), got {R.shape}")
     return grasp_axes_to_rebot_tcp_rotation(R[:, 0], R[:, 1], R[:, 2])
 
 
@@ -216,7 +217,7 @@ def transform_grasp_pose_to_base(
     pregrasp_offset_m: float,
     insertion_depth_m: float = 0.0,
 ) -> tuple[tuple[float, ...], tuple[float, ...]]:
-    """将相机坐标系下的夹取位姿转换为 base 坐标系下的夹取/预夹取 6D 位姿。"""
+    """Convert a camera-frame grasp pose to base-frame grasp/pregrasp poses."""
     T_grasp_base = _make_grasp_base_transform(position_cam, tcp_rotation_cam, T_cam2base)
     T_grasp_base = _offset_along_tool_x(T_grasp_base, -insertion_depth_m)
     T_pregrasp_base = _offset_along_tool_x(T_grasp_base, pregrasp_offset_m)
@@ -231,7 +232,7 @@ def transform_grasp_pose_to_base_with_retreat(
     retreat_offset_m: float,
     insertion_depth_m: float = 0.0,
 ) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]:
-    """将相机系夹取位姿转换为 base 系夹取、预夹取和撤退 6D 位姿。"""
+    """Convert a camera-frame grasp pose to base-frame grasp, pregrasp, and retreat poses."""
     T_grasp_base = _make_grasp_base_transform(position_cam, tcp_rotation_cam, T_cam2base)
     T_grasp_base = _offset_along_tool_x(T_grasp_base, -insertion_depth_m)
     T_pregrasp_base = _offset_along_tool_x(T_grasp_base, pregrasp_offset_m)
@@ -240,7 +241,7 @@ def transform_grasp_pose_to_base_with_retreat(
 
 
 def graspnet_rotation_to_rebot_tcp_rotation(grasp_rotation: np.ndarray) -> np.ndarray:
-    """将 GraspNet rotation_matrix 转换为 reBotArm TCP 旋转矩阵。"""
+    """Convert a GraspNet rotation_matrix to reBotArm TCP rotation."""
     R = np.asarray(grasp_rotation, dtype=np.float64)
     if R.shape != (3, 3):
         raise ValueError(f"grasp_rotation must be (3, 3), got {R.shape}")

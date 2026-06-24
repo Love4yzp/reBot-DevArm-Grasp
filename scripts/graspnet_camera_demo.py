@@ -1,3 +1,16 @@
+"""
+Live camera GraspNet preview.
+
+Keys:
+  G/Space: run GraspNet on the current RGB-D frame.
+  R: resume live preview.
+  Q/Esc: exit.
+
+Usage:
+    python scripts/graspnet_camera_demo.py
+    python scripts/graspnet_camera_demo.py --camera-type realsense_d435i
+"""
+
 from __future__ import annotations
 
 import argparse

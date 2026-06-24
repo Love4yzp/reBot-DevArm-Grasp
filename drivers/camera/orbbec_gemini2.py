@@ -1,4 +1,10 @@
-"""Orbbec Gemini 2 camera driver."""
+"""Orbbec Gemini 2 camera driver.
+
+OrbbecGemini2:
+  open() / close(): manage the pyorbbecsdk pipeline.
+  get_frame(): return aligned BGR and depth-mm frames.
+  K / D: camera matrix and distortion coefficients.
+"""
 from __future__ import annotations
 
 import os

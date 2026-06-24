@@ -1,4 +1,12 @@
-"""Camera driver base classes."""
+"""Shared RGB-D camera interface.
+
+CameraDriver:
+  open() / close(): start or stop camera streams.
+  get_frame(): return one BGR color frame and one depth-mm frame.
+  K / D: camera matrix and distortion coefficients.
+  warm_up(): drop early frames before inference or calibration.
+  setup_aruco() / detect_aruco() / draw_aruco(): optional ArUco helpers.
+"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

@@ -1,5 +1,14 @@
 """
-main.py - ordinary short-axis grasp demo
+Ordinary visual grasping demo based on YOLO.
+
+Keys:
+  G: capture the current RGB-D frame and execute the best grasp.
+  R: resume live preview.
+  Q/Esc: release, home, and exit.
+
+Usage:
+    python scripts/main.py
+    python scripts/main.py --dry-run
 """
 
 from __future__ import annotations

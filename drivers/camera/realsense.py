@@ -1,4 +1,10 @@
-"""Intel RealSense camera driver."""
+"""Intel RealSense camera driver.
+
+RealsenseCamera:
+  open() / close(): manage the pyrealsense2 pipeline.
+  get_frame(): return color-aligned BGR and depth-mm frames.
+  K / D: camera matrix and distortion coefficients.
+"""
 from __future__ import annotations
 
 import numpy as np

@@ -1,5 +1,14 @@
 """
-grasp.py - GraspNet robot grasp demo
+Visual grasping demo based on GraspNet-baseline and YOLO
+
+Keys:
+  G/Space: run GraspNet on the current RGB-D frame and execute a grasp.
+  R: resume live preview.
+  Q/Esc: release, home, and exit.
+
+Usage:
+    python scripts/grasp.py --dry-run
+    python scripts/grasp.py --target-class cup
 """
 
 from __future__ import annotations

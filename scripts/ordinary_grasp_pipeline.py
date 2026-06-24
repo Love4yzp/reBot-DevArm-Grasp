@@ -1,9 +1,13 @@
 """
 Ordinary grasp test.
 
+Keys:
+  Left click: sample depth at a pixel.
+  G: print the current best grasp.
+  Q/Esc: exit.
+
 Usage:
-  conda activate seeed
-  python scripts/ordinary_grasp_pipeline.py
+    python scripts/ordinary_grasp_pipeline.py
 """
 
 import os
