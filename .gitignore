@@ -8,5 +8,4 @@ __pycache__/
 sdk/*
 models/
 *.npz
-utils/voice
-scripts/voice_control
+*voice*
