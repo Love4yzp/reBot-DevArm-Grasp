@@ -22,11 +22,6 @@ detection:
 
 robot:
   repo_root: null
-  control:
-    dm:
-      arm_control_mode: posvel
-    rs:
-      arm_control_mode: mit
   gripper:
     dm:
       angle_open: 5.0

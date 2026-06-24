@@ -18,14 +18,12 @@ Usage:
 
 import os
 import sys
-import math
 import threading
 import argparse
 import queue
 import time
 import cv2
 import numpy as np
-import yaml
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -37,6 +35,8 @@ from drivers.robot.grasp_driver import GraspDriver, selected_arm_config
 from reBotArm_control_py.actuator import RebotArm
 from reBotArm_control_py.controllers import RebotArmEndPose
 from calibration.hand_eye import CalibMode, HandEyeCalibrator
+from utils.camera_utils import load_config
+from utils.transforms import rotation_matrix_to_euler_zyx
 
 
 # ==========================================
@@ -117,11 +117,6 @@ AUTO_SETTLE_EXTRA_S = 0.6
 AUTO_MARKER_TIMEOUT_S = 2.5
 AUTO_MARKER_STABLE_FRAMES = 4
 MIN_CALIB_SAMPLES = 5
-
-
-def load_config(path):
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
 
 
 def make_input_thread(line_queue: queue.Queue) -> threading.Thread:
@@ -423,9 +418,7 @@ def main():
             T = grasp_driver.get_tcp_pose()
             t = T[:3, 3]
             R = T[:3, :3]
-            _p = math.atan2(-R[2, 0], math.sqrt(R[0, 0]**2 + R[1, 0]**2))
-            _r = math.atan2(R[2, 1] / math.cos(_p), R[2, 2] / math.cos(_p))
-            _y = math.atan2(R[1, 0] / math.cos(_p), R[0, 0] / math.cos(_p))
+            _r, _p, _y = rotation_matrix_to_euler_zyx(R)
             print(f"  FK: x={t[0]:+.3f} y={t[1]:+.3f} z={t[2]:+.3f} m"
                   f"  rpy=[{_r:+.2f} {_p:+.2f} {_y:+.2f}] rad")
         except Exception as e:

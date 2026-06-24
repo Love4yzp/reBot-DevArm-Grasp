@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         "--open3d-grasps",
         choices=("final", "bbox", "pre-bbox"),
         default="final",
-        help="Open3D 显示的候选集合：final=最终候选，bbox=宽度过滤前，pre-bbox=bbox过滤前",
+        help="Open3D grasp set: final, bbox, or pre-bbox",
     )
     return parser.parse_args()
 

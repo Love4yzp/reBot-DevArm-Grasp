@@ -1,4 +1,4 @@
-"""Orbbec Gemini 2 相机驱动。"""
+"""Orbbec Gemini 2 camera driver."""
 from __future__ import annotations
 
 import os
@@ -7,16 +7,11 @@ import cv2
 from pathlib import Path
 from typing import Optional, Tuple
 
-from .base import CameraDriver
+from .base import CameraDriver, CameraFrameError
 
 
 class OrbbecGemini2(CameraDriver):
-    """Orbbec Gemini 2 RGBD 相机驱动。
-
-    Args:
-        width, height, fps: 分辨率与帧率（颜色流；深度流尝试相同分辨率）
-        calib_dir: 标定目录路径；含 intrinsics.npz 时从中读取畸变系数
-    """
+    """Orbbec Gemini 2 RGB-D camera driver."""
 
     def __init__(
         self,
@@ -31,15 +26,17 @@ class OrbbecGemini2(CameraDriver):
         self._calib_dir = Path(calib_dir) if calib_dir else None
 
         self._pipeline = None
+        self._depth_scale_mm: float = 1.0
         self._K: Optional[np.ndarray] = None
         self._D: Optional[np.ndarray] = None
         self._aruco = None
+        self._reset_frame_failures()
 
-    # ── 生命周期 ─────────────────────────────────────────────────────────────
+    # Lifecycle
 
     def open(self) -> None:
-        """初始化相机管线，压制 SDK C++ 日志。"""
-        # 先 import（不压制，避免 C 库加载错误被吞掉）
+        """Open the camera pipeline."""
+        # Import first so native load errors stay visible.
         try:
             from pyorbbecsdk import (
                 Pipeline, Config,
@@ -47,9 +44,9 @@ class OrbbecGemini2(CameraDriver):
                 Context,
             )
         except ImportError as e:
-            raise RuntimeError(f"未安装 pyorbbecsdk，请先编译安装: {e}") from e
+            raise RuntimeError(f"pyorbbecsdk is not installed: {e}") from e
 
-        # 仅在 C++ SDK 初始化时压制 stderr（避免时间戳异常等日志刷屏）
+        # Silence noisy native logs during SDK initialization.
         devnull = os.open(os.devnull, os.O_WRONLY)
         saved = os.dup(2)
         os.dup2(devnull, 2)
@@ -57,7 +54,6 @@ class OrbbecGemini2(CameraDriver):
 
         try:
             try:
-                # OBLogSeverity 在部分版本中不存在，动态尝试
                 from pyorbbecsdk import OBLogSeverity
                 Context().set_logger_severity(OBLogSeverity.FATAL)
             except Exception:
@@ -67,14 +63,14 @@ class OrbbecGemini2(CameraDriver):
                 self._pipeline = Pipeline()
             except Exception as e:
                 raise RuntimeError(
-                    f"Orbbec 相机未找到: {e}\n"
-                    "  可能原因: 未插入 / USB 接口松动 / udev 权限未配置\n"
-                    "  配置权限: sudo chmod a+rw /dev/bus/usb/*/*"
+                    f"Orbbec camera not found: {e}\n"
+                    "  Check USB connection and udev permissions.\n"
+                    "  Permission quick fix: sudo chmod a+rw /dev/bus/usb/*/*"
                 ) from e
 
             cfg = Config()
 
-            # 颜色流
+            # Color stream
             plist = self._pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
             cp = None
             for fmt in (OBFormat.MJPG, OBFormat.RGB):
@@ -87,7 +83,7 @@ class OrbbecGemini2(CameraDriver):
                 cp = plist.get_default_video_stream_profile()
             cfg.enable_stream(cp)
 
-            # 深度流
+            # Depth stream
             dplist = self._pipeline.get_stream_profile_list(OBSensorType.DEPTH_SENSOR)
             try:
                 dp = dplist.get_video_stream_profile(self._w, self._h, OBFormat.Y16, self._fps)
@@ -97,8 +93,9 @@ class OrbbecGemini2(CameraDriver):
 
             cfg.set_align_mode(OBAlignMode.HW_MODE)
             self._pipeline.start(cfg)
+            self._reset_frame_failures()
 
-            # 从 SDK 读取内参
+            # Intrinsics from SDK
             intr = self._pipeline.get_camera_param().rgb_intrinsic
             self._K = np.array([
                 [intr.fx, 0,       intr.cx],
@@ -106,7 +103,7 @@ class OrbbecGemini2(CameraDriver):
                 [0,       0,       1      ],
             ], dtype=np.float64)
 
-            # 畸变系数
+            # Distortion
             self._D = self._load_distortion()
 
         finally:
@@ -121,7 +118,7 @@ class OrbbecGemini2(CameraDriver):
                 pass
             self._pipeline = None
 
-    # ── 帧获取 ───────────────────────────────────────────────────────────────
+    # Frames
 
     def get_frame(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         if self._pipeline is None:
@@ -130,6 +127,7 @@ class OrbbecGemini2(CameraDriver):
             from pyorbbecsdk import OBFormat
             frames = self._pipeline.wait_for_frames(500)
             if frames is None:
+                self._record_frame_failure("wait_for_frames timeout")
                 return None, None
 
             color_bgr = None
@@ -152,30 +150,48 @@ class OrbbecGemini2(CameraDriver):
             df = frames.get_depth_frame()
             if df is not None:
                 dw, dh = df.get_width(), df.get_height()
-                depth_mm = np.frombuffer(df.get_data(), dtype=np.uint16).reshape(dh, dw)
+                depth_raw = np.frombuffer(df.get_data(), dtype=np.uint16).reshape(dh, dw)
+                depth_scale = self._depth_scale_mm
+                try:
+                    depth_scale = float(df.get_depth_scale())
+                    self._depth_scale_mm = depth_scale
+                except Exception:
+                    pass
+                depth_mm = np.clip(
+                    np.rint(depth_raw.astype(np.float32) * depth_scale),
+                    0,
+                    np.iinfo(np.uint16).max,
+                ).astype(np.uint16)
 
+            if color_bgr is None or depth_mm is None:
+                self._record_frame_failure("missing color or depth frame")
+            else:
+                self._reset_frame_failures()
             return color_bgr, depth_mm
-        except Exception:
+        except CameraFrameError:
+            raise
+        except Exception as exc:
+            self._record_frame_failure(str(exc))
             return None, None
 
-    # ── 内参 ─────────────────────────────────────────────────────────────────
+    # Intrinsics
 
     @property
     def K(self) -> np.ndarray:
         if self._K is None:
-            raise RuntimeError("相机未打开，请先调用 open()")
+            raise RuntimeError("Camera is not open")
         return self._K
 
     @property
     def D(self) -> np.ndarray:
         if self._D is None:
-            raise RuntimeError("相机未打开，请先调用 open()")
+            raise RuntimeError("Camera is not open")
         return self._D
 
-    # ── 内部 ─────────────────────────────────────────────────────────────────
+    # Internals
 
     def _load_distortion(self) -> np.ndarray:
-        """从标定目录加载畸变系数，k1 异常时降级为零畸变。"""
+        """Load distortion; fall back to zeros for invalid calibration."""
         if self._calib_dir is not None:
             npz_path = self._calib_dir / "intrinsics.npz"
             if npz_path.exists():
@@ -183,7 +199,7 @@ class OrbbecGemini2(CameraDriver):
                     data = np.load(str(npz_path))
                     D = data["dist_coeffs"].flatten()
                     if abs(D[0]) > 5.0:
-                        print(f"[OrbbecGemini2] 畸变系数 k1={D[0]:.2f} 偏大，改用零畸变")
+                        print(f"[OrbbecGemini2] Invalid k1={D[0]:.2f}; using zero distortion")
                         return np.zeros((1, 5), dtype=np.float64)
                     return D.reshape(1, -1)
                 except Exception:
