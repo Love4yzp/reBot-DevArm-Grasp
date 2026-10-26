@@ -11,13 +11,11 @@ GraspDriver:
   open_gripper(): open to a requested jaw distance.
   grasp(): close with force control and report object contact.
   release_gripper(): open and return the gripper to closed rest.
-  get_gripper_state(): return cached position, velocity, and torque.
   get_tcp_pose(): return the current TCP pose as a 4x4 matrix.
 """
 
 from __future__ import annotations
 
-import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -59,14 +57,6 @@ def find_rebot_repo_root(hint: Optional[str] = None) -> Path:
     if _is_rebot_repo_root(repo):
         return repo
     raise FileNotFoundError(f"reBotArm_control_py repo not found: {repo}")
-
-
-def ensure_rebot_sdk_in_syspath(hint: Optional[str] = None) -> Path:
-    repo = find_rebot_repo_root(hint)
-    repo_str = str(repo)
-    if repo_str not in sys.path:
-        sys.path.insert(0, repo_str)
-    return repo
 
 
 def _read_yaml(path: Path) -> dict:
@@ -261,12 +251,6 @@ class GraspDriver:
                 return state
             time.sleep(0.02)
         raise RuntimeError("Gripper feedback is not ready")
-
-    def get_gripper_state(self) -> tuple[float, float, float]:
-        state = self._read_gripper_state_cached()
-        if state is None:
-            raise RuntimeError("Gripper feedback is not ready")
-        return state
 
     def _set_position_target(self, target: float) -> None:
         with self._state_lock:

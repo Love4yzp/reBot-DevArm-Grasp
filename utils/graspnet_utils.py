@@ -312,12 +312,6 @@ def select_target(detections: list[YoloDetection], target_class: Optional[str]) 
     return max(candidates, key=lambda target: target.conf)
 
 
-def selected_target_text(selected: Optional[YoloDetection], target_class: Optional[str]) -> str:
-    if selected is None:
-        return f"target={target_class or 'best'} not found"
-    return f"target={selected.class_name} {selected.conf:.2f}"
-
-
 def target_status_text(selected: Optional[YoloDetection], detections: list[YoloDetection], target_class: Optional[str]) -> str:
     if selected is not None:
         return f"target={selected.class_name} {selected.conf:.2f} detections={len(detections)}"

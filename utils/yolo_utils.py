@@ -25,10 +25,6 @@ class YoloDetection:
     mask: np.ndarray
 
 
-# Backward-compatible alias for older scripts. New code should use YoloDetection.
-DetectionTarget = YoloDetection
-
-
 def resolve_yolo_model_path(model_name: str, project_root: Path) -> Path:
     model_path = Path(str(model_name)).expanduser()
     if model_path.is_absolute():
@@ -218,9 +214,3 @@ def detect_objects(
     )
     detections = collect_detections(results, color_bgr.shape[:2])
     return results, detections
-
-
-# Compatibility names kept for existing callers; they do not perform target selection.
-target_mask = detection_mask
-collect_targets = collect_detections
-detect_targets = detect_objects

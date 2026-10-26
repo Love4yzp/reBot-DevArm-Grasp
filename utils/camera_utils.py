@@ -9,10 +9,7 @@ from typing import Any, Optional
 import numpy as np
 import yaml
 
-try:
-    from ..drivers.camera import CameraDriver, make_camera
-except ImportError:
-    from drivers.camera import CameraDriver, make_camera
+from calibration.hand_eye import HandEyeCalibrator
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -28,10 +25,8 @@ def load_hand_eye(project_root: str | Path, cam_type: str) -> tuple[Optional[np.
     if not hand_eye_path.exists():
         return None, None
 
-    data = np.load(str(hand_eye_path), allow_pickle=False)
-    T = data["T_result"].astype(np.float64)
-    mode = str(data["mode"][0])
-    return T, mode
+    result = HandEyeCalibrator.load(hand_eye_path)
+    return result.T_result, result.mode
 
 
 def hand_eye_compensation_matrix(cfg: dict[str, Any]) -> np.ndarray:
@@ -80,12 +75,3 @@ def configure_camera(
     elif camera_type is not None and realsense_default_fps is not None and "realsense" in cam_type:
         cam_cfg["fps"] = int(realsense_default_fps)
     return cfg
-
-
-def create_camera_from_args(
-    cfg: dict[str, Any],
-    args: argparse.Namespace,
-    *,
-    realsense_default_fps: int | None = 15,
-) -> CameraDriver:
-    return make_camera(configure_camera(cfg, args, realsense_default_fps=realsense_default_fps))

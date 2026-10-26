@@ -29,75 +29,6 @@ def _nearest_rotation_matrix(R: np.ndarray) -> np.ndarray:
     return R_ortho.astype(np.float64)
 
 
-def pose6d_to_mat4(x, y, z, rx, ry, rz, degrees=False) -> np.ndarray:
-    """
-    Convert a 6D pose to a 4x4 homogeneous transform.
-
-    Args:
-        x, y, z: translation in meters.
-        rx, ry, rz: intrinsic ZYX Euler angles in roll, pitch, yaw order.
-        degrees: True when angles are in degrees; False for radians.
-
-    Returns:
-        T: (4, 4) numpy array
-    """
-    if degrees:
-        rx, ry, rz = np.radians(rx), np.radians(ry), np.radians(rz)
-
-    # Rotation around X.
-    Rx = np.array([
-        [1,          0,           0],
-        [0,  np.cos(rx), -np.sin(rx)],
-        [0,  np.sin(rx),  np.cos(rx)],
-    ])
-    # Rotation around Y.
-    Ry = np.array([
-        [ np.cos(ry), 0, np.sin(ry)],
-        [          0, 1,          0],
-        [-np.sin(ry), 0, np.cos(ry)],
-    ])
-    # Rotation around Z.
-    Rz = np.array([
-        [np.cos(rz), -np.sin(rz), 0],
-        [np.sin(rz),  np.cos(rz), 0],
-        [         0,           0, 1],
-    ])
-
-    # Intrinsic ZYX rotation: R = Rz @ Ry @ Rx.
-    R = Rz @ Ry @ Rx
-
-    T = np.eye(4, dtype=np.float64)
-    T[:3, :3] = R
-    T[:3,  3] = [x, y, z]
-    return T
-
-
-def quat_to_mat4(x, y, z, qx, qy, qz, qw) -> np.ndarray:
-    """
-    Convert translation and quaternion to a 4x4 homogeneous transform.
-
-    Args:
-        x, y, z: translation in meters.
-        qx, qy, qz, qw: Hamilton quaternion.
-
-    Returns:
-        T: (4, 4) numpy array
-    """
-    norm = np.sqrt(qx**2 + qy**2 + qz**2 + qw**2)
-    qx, qy, qz, qw = qx / norm, qy / norm, qz / norm, qw / norm
-
-    R = np.array([
-        [1 - 2*(qy**2 + qz**2),   2*(qx*qy - qz*qw),   2*(qx*qz + qy*qw)],
-        [  2*(qx*qy + qz*qw), 1 - 2*(qx**2 + qz**2),   2*(qy*qz - qx*qw)],
-        [  2*(qx*qz - qy*qw),     2*(qy*qz + qx*qw), 1 - 2*(qx**2 + qy**2)],
-    ], dtype=np.float64)
-
-    T = np.eye(4, dtype=np.float64)
-    T[:3, :3] = R
-    T[:3,  3] = [x, y, z]
-    return T
-
-
 def mat4_to_pose6d(T: np.ndarray) -> tuple:
     """
     Convert a 4x4 transform to (x, y, z, rx, ry, rz) in radians.
@@ -180,14 +111,6 @@ def grasp_axes_to_rebot_tcp_rotation(
     if np.linalg.det(R) < 0.0:
         R[:, 2] *= -1.0
     return R
-
-
-def grasp_rotation_to_rebot_tcp_rotation(grasp_rotation: np.ndarray) -> np.ndarray:
-    """Convert a [grip, open, approach] rotation matrix to reBotArm TCP rotation."""
-    R = np.asarray(grasp_rotation, dtype=np.float64)
-    if R.shape != (3, 3):
-        raise ValueError(f"grasp_rotation must be (3, 3), got {R.shape}")
-    return grasp_axes_to_rebot_tcp_rotation(R[:, 0], R[:, 1], R[:, 2])
 
 
 def _make_grasp_base_transform(

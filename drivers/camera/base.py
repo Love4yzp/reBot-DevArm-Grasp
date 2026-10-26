@@ -102,12 +102,3 @@ class CameraDriver(ABC):
     def draw_aruco(self, bgr: np.ndarray) -> np.ndarray:
         """Draw detected ArUco markers. Call setup_aruco first."""
         return self._aruco.draw_detected(bgr, self.K, self.D)
-
-    # Context manager
-
-    def __enter__(self) -> "CameraDriver":
-        self.open()
-        return self
-
-    def __exit__(self, *_) -> None:
-        self.close()

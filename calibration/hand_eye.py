@@ -141,8 +141,8 @@ class HandEyeCalibrator:
         """从 .npz 文件加载标定结果。"""
         data = np.load(str(path), allow_pickle=False)
         return CalibResult(
-            T_result=data["T_result"],
+            T_result=data["T_result"].astype(np.float64),
             mode=str(data["mode"][0]),
             n_samples=int(data["n_samples"][0]),
-            method=str(data["method"][0]) if "method" in data else "TSAI",
+            method=str(data["method"][0]),
         )
